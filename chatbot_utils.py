@@ -8,20 +8,17 @@ litellm.set_verbose = False
 # System prompts for the chatbot (as list of strings)
 SYSTEM_PROMPTS = [
     "You are a helpful AI assistant powered by Deepseek.",
-    "You are knowledgeable, friendly, and provide accurate information.",
-    "When you need to think through complex problems, you can use <think></think> tags to show your reasoning process before giving your final answer.",
+    "You are knowledgeable and friendly, and provide accurate information.",
     "Always be concise but thorough in your responses.",
+    "Try not to overthink before answering basic queries.",
 ]
-
-# Convert list to single system prompt
-SYSTEM_PROMPT = " ".join(SYSTEM_PROMPTS)
 
 
 def test_model_connection():
     """Test if the Ollama model is available"""
     try:
         response = completion(
-            model="ollama/deepseek-r1:8b",
+            model="ollama/llama3.1:8b",
             messages=[{"role": "user", "content": "Hello"}],
             api_base="http://localhost:11434",
             stream=False,
@@ -74,11 +71,13 @@ def get_response_stream(messages):
     """Get streaming response from the model"""
     try:
         # Prepare messages with system message
-        formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        formatted_messages = [
+            {"role": "system", "content": prompt} for prompt in SYSTEM_PROMPTS
+        ]
         formatted_messages.extend(messages)
 
         response = completion(
-            model="ollama/deepseek-r1:8b",
+            model="ollama/llama3.1:8b",
             messages=formatted_messages,
             api_base="http://localhost:11434",
             stream=True,
@@ -98,24 +97,3 @@ def get_response_stream(messages):
     except Exception as e:
         error_msg = f"Error: {str(e)}"
         yield error_msg, error_msg
-
-
-def get_non_stream_response(messages):
-    """Get non-streaming response from the model (for connection testing)"""
-    try:
-        formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        formatted_messages.extend(messages)
-
-        response = completion(
-            model="ollama/deepseek-r1:8b",
-            messages=formatted_messages,
-            api_base="http://localhost:11434",
-            stream=False,
-            temperature=0.7,
-            max_tokens=2000,
-        )
-
-        return response.choices[0].message.content
-
-    except Exception as e:
-        return f"Error: {str(e)}"
