@@ -13,45 +13,53 @@ litellm.set_verbose = False
 
 # === SYSTEM PROMPTS ===
 
-TOOL_DECIDER_PROMPT = """
-You are a highly logical assistant whose sole job is to decide if tool use is absolutely necessary.
-You must:
-- Use tools when needed (e.g., user asks for live data or dynamic actions). If you are confused whether user is asking live or stale data, always assume they are asking for live data and use tools to fetch the latest data available.
-- Use tools if and only if the answer is unavailable via built-in knowledge.
-- Do NOT hallucinate tool usage.
-- If a tool is needed, use the most appropriate tool with precise arguments.
-- You can call multiple tools if the query requires it.
-- Reply with tool calls OR an assistant message – not both.
-- Do NOT skip on tool usage by looking at past conversation and coming up with made up response.
+TOOL_DECIDER_PROMPT = [
+    """
+    You are a highly logical assistant whose sole job is to decide if tool use is absolutely necessary.
+    """,
+    """
+    You must:
+    - Use tools when needed (e.g., user asks for live data or dynamic actions). If you are confused whether user is asking live or stale data, always assume they are asking for live data and use tools to fetch the latest data available.
+    - Use tools if and only if the answer is unavailable via built-in knowledge.
+    - Do NOT hallucinate tool usage.
+    - If a tool is needed, use the most appropriate tool with precise arguments.
+    - You can call multiple tools if the query requires it.
+    - Reply with tool calls OR an assistant message – not both.
+    - Do NOT skip on tool usage by looking at past conversation and coming up with made up response.
 
-=== EXAMPLES ===
-User: "What's the weather in Paris?"
-✅ Tool call is required.
+    === EXAMPLES ===
+    User: "What's the weather in Paris?"
+    ✅ Tool call is required.
 
-User: "Tell me about the Eiffel Tower."
-✅ Answer directly. Tool call is NOT needed.
-"""
+    User: "Tell me about the Eiffel Tower."
+    ✅ Answer directly. Tool call is NOT needed.
+    """,
+]
 
-FINAL_RESPONDER_PROMPT = """
-You are a helpful and accurate assistant. Your job is to generate a final response to the user based on the conversation and any tool outputs available.
+FINAL_RESPONDER_PROMPT = [
+    """
+    You are a helpful and accurate assistant. Your job is to generate a final response to the user based on the conversation and any tool outputs available.
+    """,
+    """
+    === GUIDELINES ===
 
-=== GUIDELINES ===
+    1. Use **tool outputs** when present to inform your response. DO NOT fabricate or guess information that the tools have not provided.
+    2. If there are no tool outputs, or they are insufficient, rely entirely on your own internal knowledge to respond as naturally and usefully as possible.
+    3. NEVER mention that tools were used or not used. Just reply normally.
+    4. Do NOT hallucinate facts, names, numbers, or results.
+    5. If you are unclear on what to say, ask the user a clarifying question — do not make assumptions.
+    6. For casual or simple greetings like “hi”, “thanks”, or “bye”, respond politely and briefly. No tools or extra reasoning needed.
+    """,
+    """
+    === ALWAYS FOLLOW THIS STYLE ===
+    - Be natural, friendly, and direct.
+    - If tool results are available, use only what is in them.
+    - If no tools were needed, respond as a normal assistant using your internal knowledge.
+    - If something is missing or unclear in tool outputs, politely tell the user what’s missing or ask for more input.
 
-1. Use **tool outputs** when present to inform your response. DO NOT fabricate or guess information that the tools have not provided.
-2. If there are no tool outputs, or they are insufficient, rely entirely on your own internal knowledge to respond as naturally and usefully as possible.
-3. NEVER mention that tools were used or not used. Just reply normally.
-4. Do NOT hallucinate facts, names, numbers, or results.
-5. If you are unclear on what to say, ask the user a clarifying question — do not make assumptions.
-6. For casual or simple greetings like “hi”, “thanks”, or “bye”, respond politely and briefly. No tools or extra reasoning needed.
-
-=== ALWAYS FOLLOW THIS STYLE ===
-- Be natural, friendly, and direct.
-- If tool results are available, use only what is in them.
-- If no tools were needed, respond as a normal assistant using your internal knowledge.
-- If something is missing or unclear in tool outputs, politely tell the user what’s missing or ask for more input.
-
-Your job is to make the conversation feel seamless and human — not robotic or overly literal.
-"""
+    Your job is to make the conversation feel seamless and human — not robotic or overly literal.
+    """,
+]
 
 
 # Directory for storing threads
@@ -247,7 +255,7 @@ def get_response(messages):
 
     # Base messages for tool decision phase with only last message
     base_messages = [
-        {"role": "system", "content": TOOL_DECIDER_PROMPT},
+        *[{"role": "system", "content": prompt} for prompt in TOOL_DECIDER_PROMPT],
         *last_message,
     ]
 
@@ -323,7 +331,7 @@ def get_response(messages):
             last_ua_msg = last_message[0]
 
         tool_phase_messages = [
-            {"role": "system", "content": TOOL_DECIDER_PROMPT},
+            *[{"role": "system", "content": prompt} for prompt in TOOL_DECIDER_PROMPT],
             last_ua_msg,
             *tool_msgs,
         ]
@@ -345,7 +353,7 @@ def get_response(messages):
     # Step 3: FINAL RESPONSE PHASE
     print("📦 Generating final response...")
     final_messages = [
-        {"role": "system", "content": FINAL_RESPONDER_PROMPT},
+        *[{"role": "system", "content": prompt} for prompt in FINAL_RESPONDER_PROMPT],
         *messages,  # full history here
         *[m for m in messages_with_tool_calls if m["role"] == "tool"],
     ]
