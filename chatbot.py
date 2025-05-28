@@ -4,7 +4,7 @@ import os
 import uuid
 from datetime import datetime
 from chatbot_utils import (
-    get_response_stream,
+    get_response,  # Changed from get_response_stream
     test_model_connection,
     parse_thinking_response,
     generate_thread_title,
@@ -232,7 +232,7 @@ with st.sidebar:
     **Features:**
     - Thread-based conversations
     - Automatic title generation
-    - Real-time streaming responses
+    - Complete responses (non-streaming)
     - Thought process visibility
     - Chat history export
     - Local AI processing
@@ -258,11 +258,12 @@ with st.expander("📋 Quick Start Guide"):
     3. Pull Deepseek model: `ollama pull deepseek-r1:8b`
     4. Install dependencies: `pip install streamlit litellm`
     
-    **New Features:**
+    **Features:**
     - **Threads**: Each conversation is saved as a separate thread
     - **Auto Titles**: Thread titles are automatically generated from the first message
     - **Persistent Storage**: All threads are saved locally in the `threads/` directory
     - **Thread Management**: Create, switch between, and delete threads easily
+    - **Non-streaming**: Complete responses are loaded at once
     
     **Usage:**
     - Click "➕ New Thread" to start a fresh conversation
@@ -299,64 +300,28 @@ if prompt := st.chat_input("What would you like to know?"):
     # Generate and display assistant response
     with st.chat_message("assistant"):
         try:
-            # Create placeholders for thinking indicator and response
-            thinking_indicator = st.empty()
-            response_placeholder = st.empty()
+            # Show loading indicator
+            with st.spinner("AI is thinking..."):
+                # Get complete response (non-streaming)
+                full_response = get_response(st.session_state.messages)
 
-            full_response = ""
-            thinking_detected = False
-            thinking_complete = False
-
-            # Stream the response
-            for chunk_content, current_full_response in get_response_stream(
-                st.session_state.messages
-            ):
-                if chunk_content.startswith("Error:"):
-                    response_placeholder.error(chunk_content)
-                    break
-
-                full_response = current_full_response
-
-                # Check if we're in thinking mode
-                if "<think>" in full_response and not thinking_detected:
-                    thinking_detected = True
-                    thinking_indicator.markdown("🧠 *AI is thinking...*")
-
-                # Check if thinking is complete
-                if (
-                    thinking_detected
-                    and "</think>" in full_response
-                    and not thinking_complete
-                ):
-                    thinking_complete = True
-                    thinking_indicator.empty()
-
-                # Display the response content
-                if thinking_complete:
-                    # Parse and show only the main response part
-                    _, main_response = parse_thinking_response(full_response)
-                    if main_response:
-                        response_placeholder.markdown(main_response + "▌")
-                elif not thinking_detected:
-                    # Normal streaming without thinking
-                    response_placeholder.markdown(full_response + "▌")
-
-            # Final processing after streaming is complete
-            if not full_response.startswith("Error:") and full_response:
+            if full_response.startswith("Error:"):
+                st.error(full_response)
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": full_response}
+                )
+            else:
                 # Parse the complete response
                 thinking_content, main_response = parse_thinking_response(full_response)
 
-                # Clear the thinking indicator
-                thinking_indicator.empty()
-
                 final_content = main_response if main_response else full_response
 
-                # Show final thinking section if exists
+                # Show thinking section if exists
                 if thinking_content:
                     display_thinking_section(thinking_content)
 
-                # Display final response without streaming cursor
-                response_placeholder.markdown(final_content)
+                # Display final response
+                st.markdown(final_content)
 
                 # Add to chat history
                 message_data = {"role": "assistant", "content": final_content}
@@ -373,7 +338,6 @@ if prompt := st.chat_input("What would you like to know?"):
                     )
                     == 1
                 ):
-
                     # Generate title in background
                     new_title = generate_thread_title(prompt, final_content)
                     if new_title and new_title != "New Chat":

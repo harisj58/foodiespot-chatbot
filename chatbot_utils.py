@@ -186,26 +186,6 @@ def test_model_connection():
         return False, f"Model connection failed: {str(e)}"
 
 
-def extract_current_thinking(text):
-    """
-    Extract current thinking content from partial response
-    Returns the thinking content if <think> is present, even if not closed yet
-    """
-    if "<think>" not in text:
-        return None
-
-    # Find the start of thinking
-    start_idx = text.find("<think>") + 7
-
-    # Check if thinking is complete
-    if "</think>" in text:
-        end_idx = text.find("</think>")
-        return text[start_idx:end_idx].strip()
-    else:
-        # Return partial thinking content
-        return text[start_idx:].strip()
-
-
 def parse_thinking_response(text):
     """
     Parse response to separate thinking content from main response
@@ -224,8 +204,8 @@ def parse_thinking_response(text):
     return thinking_content, main_response
 
 
-def get_response_stream(messages):
-    """Get streaming response from the model"""
+def get_response(messages):
+    """Get complete response from the model (non-streaming)"""
     try:
         # Prepare messages with system message
         formatted_messages = [
@@ -237,23 +217,18 @@ def get_response_stream(messages):
             model="ollama/llama3.1:8b",
             messages=formatted_messages,
             api_base="http://localhost:11434",
-            stream=True,
+            stream=False,
             temperature=0.7,
             max_tokens=2000,
         )
 
-        full_response = ""
-        for chunk in response:
-            if hasattr(chunk, "choices") and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
-                if hasattr(delta, "content") and delta.content:
-                    chunk_content = delta.content
-                    full_response += chunk_content
-                    yield chunk_content, full_response
+        if hasattr(response, "choices") and len(response.choices) > 0:
+            return response.choices[0].message.content
+        else:
+            return "Error: No response received from model"
 
     except Exception as e:
-        error_msg = f"Error: {str(e)}"
-        yield error_msg, error_msg
+        return f"Error: {str(e)}"
 
 
 def export_all_threads() -> str:
