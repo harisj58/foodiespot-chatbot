@@ -17,7 +17,7 @@ from chatbot_utils import (
 
 # Page configuration
 st.set_page_config(
-    page_title="Deepseek Chatbot",
+    page_title="FoodieSpot Chatbot",
     page_icon="🤖",
     layout="centered",
     initial_sidebar_state="expanded",
@@ -99,7 +99,7 @@ def display_thinking_section(thinking_content):
 
 # Sidebar
 with st.sidebar:
-    st.header("🤖 Deepseek Chatbot")
+    st.header("🤖 FoodieSpot Chatbot")
 
     # Thread management
     st.subheader("💬 Threads")
@@ -227,7 +227,7 @@ with st.sidebar:
     st.subheader("ℹ️ About")
     st.markdown(
         """
-    This chatbot uses Deepseek R1 8B model running locally via Ollama.
+    This chatbot uses Llama3 Groq Tool Use 8B model running locally via Ollama.
     
     **Features:**
     - Thread-based conversations
@@ -240,7 +240,7 @@ with st.sidebar:
     )
 
 # Main chat interface
-st.title("💬 Deepseek Chat")
+st.title("💬 FoodieSpot Chat")
 
 # Create new thread if none exists
 if not st.session_state.current_thread_id:
@@ -255,7 +255,7 @@ with st.expander("📋 Quick Start Guide"):
     **Prerequisites:**
     1. Install Ollama: `curl -fsSL https://ollama.ai/install.sh | sh`
     2. Start Ollama: `ollama serve`
-    3. Pull Deepseek model: `ollama pull deepseek-r1:8b`
+    3. Pull Deepseek model: `ollama pull llama3-groq-tool-use:8b`
     4. Install dependencies: `pip install streamlit litellm`
     
     **Features:**
@@ -367,5 +367,5 @@ if prompt := st.chat_input("What would you like to know?"):
 # Footer
 st.divider()
 st.caption(
-    "🔧 Make sure Ollama is running with `ollama serve` and the Deepseek model is available with `ollama pull deepseek-r1:8b`"
+    "🔧 Make sure Ollama is running with `ollama serve` and the Deepseek model is available with `ollama pull llama3-groq-tool-use:8b`"
 )
