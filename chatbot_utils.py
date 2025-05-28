@@ -4,18 +4,54 @@ import re
 import os
 import json
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
+from ChatbotFunctions import ChatbotFunctions as ChatFn
+from copy import deepcopy
 
 # Configure LiteLLM for Ollama
 litellm.set_verbose = False
 
-# System prompts for the chatbot (as list of strings)
-SYSTEM_PROMPTS = [
-    "You are a helpful AI assistant powered by Deepseek.",
-    "You are knowledgeable and friendly, and provide accurate information.",
-    "Always be concise but thorough in your responses.",
-    "Try not to overthink before answering basic queries.",
-]
+# === SYSTEM PROMPTS ===
+
+TOOL_DECIDER_PROMPT = """
+You are a highly logical assistant whose sole job is to decide if tool use is absolutely necessary.
+You must:
+- Use tools only if strictly needed (e.g., user asks for live data or dynamic actions).
+- Use tools if and only if the answer is unavailable via built-in knowledge.
+- Do NOT hallucinate tool usage.
+- If a tool is needed, use the most appropriate tool with precise arguments.
+- You can call multiple tools if the query requires it.
+- Reply with tool calls OR an assistant message – not both.
+
+=== EXAMPLES ===
+User: "What's the weather in Paris?"
+✅ Tool call is required.
+
+User: "Tell me about the Eiffel Tower."
+✅ Answer directly. Tool call is NOT needed.
+"""
+
+FINAL_RESPONDER_PROMPT = """
+You are a helpful and accurate assistant. Your job is to generate a final response to the user based on the conversation and any tool outputs available.
+
+=== GUIDELINES ===
+
+1. Use **tool outputs** when present to inform your response. DO NOT fabricate or guess information that the tools have not provided.
+2. If there are no tool outputs, or they are insufficient, rely entirely on your own internal knowledge to respond as naturally and usefully as possible.
+3. NEVER mention that tools were used or not used. Just reply normally.
+4. Do NOT hallucinate facts, names, numbers, or results.
+5. If you are unclear on what to say, ask the user a clarifying question — do not make assumptions.
+6. For casual or simple greetings like “hi”, “thanks”, or “bye”, respond politely and briefly. No tools or extra reasoning needed.
+
+=== ALWAYS FOLLOW THIS STYLE ===
+- Be natural, friendly, and direct.
+- If tool results are available, use only what is in them.
+- If no tools were needed, respond as a normal assistant using your internal knowledge.
+- If something is missing or unclear in tool outputs, politely tell the user what’s missing or ask for more input.
+
+Your job is to make the conversation feel seamless and human — not robotic or overly literal.
+"""
+
 
 # Directory for storing threads
 THREADS_DIR = "threads"
@@ -135,7 +171,7 @@ def generate_thread_title(user_message: str, assistant_response: str) -> str:
         Generate only the title, nothing else. Make it descriptive but brief."""
 
         response = completion(
-            model="ollama/llama3.1:8b",
+            model="ollama_chat/llama3-groq-tool-use:8b",
             messages=[
                 {
                     "role": "system",
@@ -205,30 +241,96 @@ def parse_thinking_response(text):
 
 
 def get_response(messages):
-    """Get complete response from the model (non-streaming)"""
-    try:
-        # Prepare messages with system message
-        formatted_messages = [
-            {"role": "system", "content": prompt} for prompt in SYSTEM_PROMPTS
-        ]
-        formatted_messages.extend(messages)
+    base_messages = [
+        {"role": "system", "content": TOOL_DECIDER_PROMPT},
+        *messages,
+    ]
 
-        response = completion(
-            model="ollama/llama3.1:8b",
-            messages=formatted_messages,
+    tools = [
+        {"type": "function", "function": desc} for desc in ChatFn.get_descriptions()
+    ]
+
+    # Step 1: TOOL DECISION PHASE
+    print("🧠 Deciding if tools are needed...")
+    res = completion(
+        model="ollama_chat/llama3-groq-tool-use:8b",
+        messages=base_messages,
+        api_base="http://localhost:11434",
+        stream=False,
+        tools=tools,
+        tool_choice="auto",
+        temperature=0.3,
+    )
+
+    messages_with_tool_calls = deepcopy(base_messages)
+
+    tool_calls = res.choices[0].message.tool_calls
+    if not tool_calls:
+        # No tools required, return the normal response
+        return res.choices[0].message.content
+
+    tool_called = True
+    round_count = 0
+    MAX_TOOL_ROUNDS = 3
+
+    # Step 2: TOOL EXECUTION PHASE
+    while tool_called and round_count < MAX_TOOL_ROUNDS:
+        print(f"🔧 Executing tool calls (Round {round_count + 1})...")
+
+        # Append tool calls from assistant
+        messages_with_tool_calls.append({"role": "assistant", "tool_calls": tool_calls})
+
+        # Execute each tool call and append tool result
+        for call in tool_calls:
+            fn_name = call.function.name
+            fn_args = json.loads(call.function.arguments)
+            print(f"Calling tool: {fn_name} with args: {fn_args}")
+            try:
+                fn = getattr(ChatFn, fn_name)
+                output = fn(**fn_args)
+            except Exception as e:
+                output = f"Tool failed: {str(e)}"
+            messages_with_tool_calls.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "name": fn_name,
+                    "content": str(output),
+                }
+            )
+
+        # Ask if more tool calls are needed
+        res = completion(
+            model="ollama_chat/llama3-groq-tool-use:8b",
+            messages=messages_with_tool_calls,
             api_base="http://localhost:11434",
             stream=False,
-            temperature=0.7,
-            max_tokens=2000,
+            tools=tools,
+            tool_choice="auto",
+            temperature=0.3,
         )
 
-        if hasattr(response, "choices") and len(response.choices) > 0:
-            return response.choices[0].message.content
-        else:
-            return "Error: No response received from model"
+        tool_calls = res.choices[0].message.tool_calls
+        round_count += 1
+        tool_called = tool_calls is not None
 
-    except Exception as e:
-        return f"Error: {str(e)}"
+    # Step 3: FINAL RESPONSE PHASE
+    print("📦 Generating final response...")
+    final_messages = [
+        {"role": "system", "content": FINAL_RESPONDER_PROMPT},
+        *messages,
+        *[m for m in messages_with_tool_calls if m["role"] == "tool"],
+    ]
+
+    final_res = completion(
+        model="ollama_chat/llama3-groq-tool-use:8b",
+        messages=final_messages,
+        api_base="http://localhost:11434",
+        stream=False,
+        temperature=0.3,
+    )
+
+    return final_res.choices[0].message.content
 
 
 def export_all_threads() -> str:
