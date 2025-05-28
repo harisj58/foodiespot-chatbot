@@ -1,0 +1,450 @@
+[
+  {
+    "name": "FoodieSpot - Indiranagar",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Indiranagar"
+    },
+    "seating_capacity": 111,
+    "cuisine": ["South Indian"],
+    "ambience": "Trendy",
+    "average_cost_per_person": 290,
+    "best_selling_dishes": ["Idli-Vada Combo", "Kebabs", "Chicken Ghee Roast"],
+    "speed_of_service_rating": 4.6,
+    "review_count": 396,
+    "average_rating": 4.5
+  },
+  {
+    "name": "FoodieSpot - Koramangala",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Koramangala"
+    },
+    "seating_capacity": 99,
+    "cuisine": ["Mediterranean"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 166,
+    "best_selling_dishes": [
+      "Masala Dosa",
+      "Paneer Butter Masala",
+      "Idli-Vada Combo"
+    ],
+    "speed_of_service_rating": 3.8,
+    "review_count": 358,
+    "average_rating": 3.1
+  },
+  {
+    "name": "FoodieSpot - Whitefield",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Whitefield"
+    },
+    "seating_capacity": 55,
+    "cuisine": ["Thai", "Mangalorean", "Continental"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 451,
+    "best_selling_dishes": [
+      "Bisi Bele Bath",
+      "Masala Dosa",
+      "Chicken Ghee Roast"
+    ],
+    "speed_of_service_rating": 4.5,
+    "review_count": 224,
+    "average_rating": 3.6
+  },
+  {
+    "name": "FoodieSpot - MG Road",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "MG Road"
+    },
+    "seating_capacity": 57,
+    "cuisine": ["North Indian", "Mediterranean"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 199,
+    "best_selling_dishes": ["Mango Lassi", "Kebabs", "Bisi Bele Bath"],
+    "speed_of_service_rating": 4.7,
+    "review_count": 423,
+    "average_rating": 3.9
+  },
+  {
+    "name": "FoodieSpot - Jayanagar",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Jayanagar"
+    },
+    "seating_capacity": 45,
+    "cuisine": ["North Indian", "Thai"],
+    "ambience": "Rooftop",
+    "average_cost_per_person": 574,
+    "best_selling_dishes": ["Kebabs", "Mango Lassi", "Idli-Vada Combo"],
+    "speed_of_service_rating": 4.6,
+    "review_count": 73,
+    "average_rating": 4.3
+  },
+  {
+    "name": "FoodieSpot - HSR Layout",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "HSR Layout"
+    },
+    "seating_capacity": 128,
+    "cuisine": ["North Indian", "Continental"],
+    "ambience": "Traditional",
+    "average_cost_per_person": 201,
+    "best_selling_dishes": ["Mysore Pak", "Bisi Bele Bath", "Filter Coffee"],
+    "speed_of_service_rating": 4.5,
+    "review_count": 236,
+    "average_rating": 3.3
+  },
+  {
+    "name": "FoodieSpot - BTM Layout",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "BTM Layout"
+    },
+    "seating_capacity": 75,
+    "cuisine": ["Italian"],
+    "ambience": "Trendy",
+    "average_cost_per_person": 499,
+    "best_selling_dishes": [
+      "Paneer Butter Masala",
+      "Chicken Ghee Roast",
+      "Idli-Vada Combo"
+    ],
+    "speed_of_service_rating": 3.7,
+    "review_count": 244,
+    "average_rating": 3.5
+  },
+  {
+    "name": "FoodieSpot - Marathahalli",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Marathahalli"
+    },
+    "seating_capacity": 148,
+    "cuisine": ["Thai", "Continental", "Andhra"],
+    "ambience": "Traditional",
+    "average_cost_per_person": 543,
+    "best_selling_dishes": ["Masala Dosa", "Idli-Vada Combo", "Kebabs"],
+    "speed_of_service_rating": 4.7,
+    "review_count": 255,
+    "average_rating": 3.5
+  },
+  {
+    "name": "FoodieSpot - Rajajinagar",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Rajajinagar"
+    },
+    "seating_capacity": 57,
+    "cuisine": ["Andhra", "Continental", "Fusion"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 479,
+    "best_selling_dishes": [
+      "Filter Coffee",
+      "Chicken Ghee Roast",
+      "Bisi Bele Bath"
+    ],
+    "speed_of_service_rating": 3.7,
+    "review_count": 431,
+    "average_rating": 4.1
+  },
+  {
+    "name": "FoodieSpot - Yelahanka",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Yelahanka"
+    },
+    "seating_capacity": 63,
+    "cuisine": ["Mediterranean", "Mangalorean", "Thai"],
+    "ambience": "Rooftop",
+    "average_cost_per_person": 262,
+    "best_selling_dishes": [
+      "Chicken Ghee Roast",
+      "Gobi Manchurian",
+      "Filter Coffee"
+    ],
+    "speed_of_service_rating": 3.6,
+    "review_count": 74,
+    "average_rating": 4.7
+  },
+  {
+    "name": "FoodieSpot - Basavanagudi",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Basavanagudi"
+    },
+    "seating_capacity": 49,
+    "cuisine": ["Chinese", "Mangalorean", "North Indian"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 345,
+    "best_selling_dishes": ["Kebabs", "Filter Coffee", "Bisi Bele Bath"],
+    "speed_of_service_rating": 5.0,
+    "review_count": 490,
+    "average_rating": 4.9
+  },
+  {
+    "name": "FoodieSpot - Hebbal",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Hebbal"
+    },
+    "seating_capacity": 117,
+    "cuisine": ["North Indian", "Thai", "Italian"],
+    "ambience": "Traditional",
+    "average_cost_per_person": 478,
+    "best_selling_dishes": [
+      "Mango Lassi",
+      "Paneer Butter Masala",
+      "Bisi Bele Bath"
+    ],
+    "speed_of_service_rating": 4.2,
+    "review_count": 282,
+    "average_rating": 3.0
+  },
+  {
+    "name": "FoodieSpot - Electronic City",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Electronic City"
+    },
+    "seating_capacity": 122,
+    "cuisine": ["Italian", "Thai", "Chinese"],
+    "ambience": "Romantic",
+    "average_cost_per_person": 204,
+    "best_selling_dishes": [
+      "Bisi Bele Bath",
+      "Gobi Manchurian",
+      "Idli-Vada Combo"
+    ],
+    "speed_of_service_rating": 3.7,
+    "review_count": 440,
+    "average_rating": 3.3
+  },
+  {
+    "name": "FoodieSpot - Banashankari",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Banashankari"
+    },
+    "seating_capacity": 129,
+    "cuisine": ["South Indian", "Andhra", "Fusion"],
+    "ambience": "Casual",
+    "average_cost_per_person": 207,
+    "best_selling_dishes": ["Mango Lassi", "Bisi Bele Bath", "Idli-Vada Combo"],
+    "speed_of_service_rating": 3.6,
+    "review_count": 499,
+    "average_rating": 4.1
+  },
+  {
+    "name": "FoodieSpot - Malleshwaram",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Malleshwaram"
+    },
+    "seating_capacity": 40,
+    "cuisine": ["Fusion"],
+    "ambience": "Traditional",
+    "average_cost_per_person": 185,
+    "best_selling_dishes": ["Gobi Manchurian", "Chicken Ghee Roast", "Kebabs"],
+    "speed_of_service_rating": 4.5,
+    "review_count": 331,
+    "average_rating": 3.3
+  },
+  {
+    "name": "FoodieSpot - Frazer Town",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Frazer Town"
+    },
+    "seating_capacity": 97,
+    "cuisine": ["Mangalorean", "Continental", "Thai"],
+    "ambience": "Trendy",
+    "average_cost_per_person": 309,
+    "best_selling_dishes": ["Mysore Pak", "Mango Lassi", "Filter Coffee"],
+    "speed_of_service_rating": 4.8,
+    "review_count": 281,
+    "average_rating": 3.2
+  },
+  {
+    "name": "FoodieSpot - Ulsoor",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Ulsoor"
+    },
+    "seating_capacity": 58,
+    "cuisine": ["Andhra"],
+    "ambience": "Casual",
+    "average_cost_per_person": 451,
+    "best_selling_dishes": ["Gobi Manchurian", "Idli-Vada Combo", "Kebabs"],
+    "speed_of_service_rating": 3.5,
+    "review_count": 412,
+    "average_rating": 4.3
+  },
+  {
+    "name": "FoodieSpot - Kalyan Nagar",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Kalyan Nagar"
+    },
+    "seating_capacity": 59,
+    "cuisine": ["South Indian"],
+    "ambience": "Traditional",
+    "average_cost_per_person": 319,
+    "best_selling_dishes": [
+      "Paneer Butter Masala",
+      "Gobi Manchurian",
+      "Idli-Vada Combo"
+    ],
+    "speed_of_service_rating": 3.9,
+    "review_count": 298,
+    "average_rating": 3.4
+  },
+  {
+    "name": "FoodieSpot - Sarjapur",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Sarjapur"
+    },
+    "seating_capacity": 46,
+    "cuisine": ["Mediterranean", "Fusion", "Continental"],
+    "ambience": "Traditional",
+    "average_cost_per_person": 392,
+    "best_selling_dishes": [
+      "Mysore Pak",
+      "Idli-Vada Combo",
+      "Paneer Butter Masala"
+    ],
+    "speed_of_service_rating": 3.6,
+    "review_count": 270,
+    "average_rating": 3.7
+  },
+  {
+    "name": "FoodieSpot - JP Nagar",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "JP Nagar"
+    },
+    "seating_capacity": 82,
+    "cuisine": ["South Indian", "North Indian"],
+    "ambience": "Casual",
+    "average_cost_per_person": 356,
+    "best_selling_dishes": [
+      "Mango Lassi",
+      "Paneer Butter Masala",
+      "Idli-Vada Combo"
+    ],
+    "speed_of_service_rating": 3.8,
+    "review_count": 324,
+    "average_rating": 3.9
+  },
+  {
+    "name": "FoodieSpot - Domlur",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Domlur"
+    },
+    "seating_capacity": 84,
+    "cuisine": ["Italian"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 277,
+    "best_selling_dishes": ["Paneer Butter Masala", "Filter Coffee", "Kebabs"],
+    "speed_of_service_rating": 3.6,
+    "review_count": 326,
+    "average_rating": 4.7
+  },
+  {
+    "name": "FoodieSpot - Nagarbhavi",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Nagarbhavi"
+    },
+    "seating_capacity": 41,
+    "cuisine": ["Chinese"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 398,
+    "best_selling_dishes": ["Filter Coffee", "Idli-Vada Combo", "Mysore Pak"],
+    "speed_of_service_rating": 4.9,
+    "review_count": 134,
+    "average_rating": 3.8
+  },
+  {
+    "name": "FoodieSpot - RT Nagar",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "RT Nagar"
+    },
+    "seating_capacity": 79,
+    "cuisine": ["Fusion", "Italian"],
+    "ambience": "Family Friendly",
+    "average_cost_per_person": 506,
+    "best_selling_dishes": [
+      "Gobi Manchurian",
+      "Filter Coffee",
+      "Chicken Ghee Roast"
+    ],
+    "speed_of_service_rating": 3.8,
+    "review_count": 161,
+    "average_rating": 4.9
+  },
+  {
+    "name": "FoodieSpot - Bellandur",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Bellandur"
+    },
+    "seating_capacity": 104,
+    "cuisine": ["Thai", "South Indian", "Andhra"],
+    "ambience": "Casual",
+    "average_cost_per_person": 175,
+    "best_selling_dishes": ["Kebabs", "Filter Coffee", "Chicken Ghee Roast"],
+    "speed_of_service_rating": 3.6,
+    "review_count": 310,
+    "average_rating": 3.2
+  },
+  {
+    "name": "FoodieSpot - Kengeri",
+    "location": {
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "area": "Kengeri"
+    },
+    "seating_capacity": 53,
+    "cuisine": ["Mediterranean"],
+    "ambience": "Casual",
+    "average_cost_per_person": 495,
+    "best_selling_dishes": [
+      "Idli-Vada Combo",
+      "Mysore Pak",
+      "Paneer Butter Masala"
+    ],
+    "speed_of_service_rating": 4.9,
+    "review_count": 341,
+    "average_rating": 3.5
+  }
+]
