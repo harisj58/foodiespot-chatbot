@@ -20,7 +20,10 @@ SYSTEM_PROMPTS = [
     Once that is done, you are to also take reservations should the user ask for it. To help craft better responses, you may be provided with results of certain tool calls. Use them appropriately.
     """,
     """
-    Start by asking the location the user is interested in. Once that you have obtained matching locations, display them to the user for confirmation.
+    Start by asking the location the user is interested in. Once that you have obtained matching locations, check if the location specified by user is in the list. If not, show them the list and confirm otherwise proceed.
+    """,
+    """
+    Next show the user the various cuisines available at the location they desire. Once they have chosen their desired cuisine type, we can recommend them suitable restaurants.
     """,
     """
     You must:
@@ -259,7 +262,6 @@ def get_response(messages):
             {"type": "function", "function": description}
             for description in ChatFn.get_descriptions()
         ]
-        print(f"Tools: {tools}")
 
         response = ""
 
@@ -270,7 +272,6 @@ def get_response(messages):
             stream=False,
             tools=tools,
         )
-        print(res)
 
         content = res.choices[0].message.content
         if res.choices[0].message.tool_calls is None:
@@ -317,7 +318,6 @@ def get_response(messages):
                         stream=False,
                         tools=tools,
                     )
-                    print(res)
 
                     # Update based on new response
                     if res.choices[0].message.content is not None:
