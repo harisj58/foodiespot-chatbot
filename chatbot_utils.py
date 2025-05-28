@@ -13,9 +13,14 @@ litellm.set_verbose = False
 
 # === SYSTEM PROMPTS ===
 
-TOOL_DECIDER_PROMPT = [
+SYSTEM_PROMPTS = [
     """
-    You are a highly logical assistant whose sole job is to decide if tool use is absolutely necessary.
+    You are the responder agent of FoodieSpot - a chain of restaurants across Bengaluru. Always introduce yourself as DineMate. Your job is to recommend users restaurant options by FoodieSpot based on user's preferences.
+    
+    Once that is done, you are to also take reservations should the user ask for it. To help craft better responses, you may be provided with results of certain tool calls. Use them appropriately.
+    """,
+    """
+    Start by asking the location the user is interested in. Once that you have obtained matching locations, display them to the user for confirmation.
     """,
     """
     You must:
@@ -33,12 +38,6 @@ TOOL_DECIDER_PROMPT = [
 
     User: "Tell me about the Eiffel Tower."
     ✅ Answer directly. Tool call is NOT needed.
-    """,
-]
-
-FINAL_RESPONDER_PROMPT = [
-    """
-    You are a helpful and accurate assistant. Your job is to generate a final response to the user based on the conversation and any tool outputs available.
     """,
     """
     === GUIDELINES ===
@@ -60,8 +59,6 @@ FINAL_RESPONDER_PROMPT = [
     Your job is to make the conversation feel seamless and human — not robotic or overly literal.
     """,
 ]
-
-
 # Directory for storing threads
 THREADS_DIR = "threads"
 
@@ -250,123 +247,100 @@ def parse_thinking_response(text):
 
 
 def get_response(messages):
-    # Only pass the last message to the tooling agent phases
-    last_message = messages[-1:]  # last message as a list
-
-    # Base messages for tool decision phase with only last message
-    base_messages = [
-        *[{"role": "system", "content": prompt} for prompt in TOOL_DECIDER_PROMPT],
-        *last_message,
-    ]
-
-    tools = [
-        {"type": "function", "function": desc} for desc in ChatFn.get_descriptions()
-    ]
-
-    # Step 1: TOOL DECISION PHASE
-    print("🧠 Deciding if tools are needed...")
-    res = completion(
-        model="ollama_chat/llama3-groq-tool-use:8b",
-        messages=base_messages,
-        api_base="http://localhost:11434",
-        stream=False,
-        tools=tools,
-        tool_choice="auto",
-        temperature=0.3,
-    )
-
-    messages_with_tool_calls = deepcopy(base_messages)
-
-    tool_calls = res.choices[0].message.tool_calls
-    if not tool_calls:
-        # No tools required, return the normal response
-        return res.choices[0].message.content
-
-    tool_called = True
-    round_count = 0
-    MAX_TOOL_ROUNDS = 3
-
-    # Step 2: TOOL EXECUTION PHASE
-    while tool_called and round_count < MAX_TOOL_ROUNDS:
-        print(f"🔧 Executing tool calls (Round {round_count + 1})...")
-
-        # Append tool calls from assistant
-        messages_with_tool_calls.append({"role": "assistant", "tool_calls": tool_calls})
-
-        # Execute each tool call and append tool result
-        for call in tool_calls:
-            fn_name = call.function.name
-            fn_args = json.loads(call.function.arguments)
-            print(f"Calling tool: {fn_name} with args: {fn_args}")
-            try:
-                fn = getattr(ChatFn, fn_name)
-                output = fn(**fn_args)
-            except Exception as e:
-                output = f"Tool failed: {str(e)}"
-            messages_with_tool_calls.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "name": fn_name,
-                    "content": str(output),
-                }
-            )
-
-        # For the next tool call, keep system prompt + last user/assistant message + tool results only
-        # Extract last user/assistant message from messages_with_tool_calls:
-        # Since we only append new tool calls and results after last message, get last non-system message:
-        # But safest: only keep system prompt + last user/assistant + all tool results so far
-
-        # Get all tool messages
-        tool_msgs = [m for m in messages_with_tool_calls if m["role"] == "tool"]
-
-        # Find last user or assistant message after system prompt
-        last_ua_msg = None
-        for m in reversed(messages_with_tool_calls):
-            if m["role"] in ("user", "assistant") and "tool_calls" not in m:
-                last_ua_msg = m
-                break
-        if last_ua_msg is None:
-            # fallback to last_message from start
-            last_ua_msg = last_message[0]
-
-        tool_phase_messages = [
-            *[{"role": "system", "content": prompt} for prompt in TOOL_DECIDER_PROMPT],
-            last_ua_msg,
-            *tool_msgs,
+    """Get complete response from the model (non-streaming)"""
+    try:
+        # Prepare messages with system message
+        formatted_messages = [
+            {"role": "system", "content": prompt} for prompt in SYSTEM_PROMPTS
         ]
+        formatted_messages.extend(messages)
+
+        tools = [
+            {"type": "function", "function": description}
+            for description in ChatFn.get_descriptions()
+        ]
+        print(f"Tools: {tools}")
+
+        response = ""
 
         res = completion(
             model="ollama_chat/llama3-groq-tool-use:8b",
-            messages=tool_phase_messages,
+            messages=formatted_messages,
             api_base="http://localhost:11434",
             stream=False,
             tools=tools,
-            tool_choice="auto",
-            temperature=0.3,
         )
+        print(res)
 
-        tool_calls = res.choices[0].message.tool_calls
-        round_count += 1
-        tool_called = tool_calls is not None
+        content = res.choices[0].message.content
+        if res.choices[0].message.tool_calls is None:
+            response = content
+        else:
+            tool_called = True
+            res_copy = res
+            while tool_called:
+                formatted_messages.append(
+                    {
+                        "role": "assistant",
+                        "tool_calls": res.choices[0].message.tool_calls,
+                    }
+                )
 
-    # Step 3: FINAL RESPONSE PHASE
-    print("📦 Generating final response...")
-    final_messages = [
-        *[{"role": "system", "content": prompt} for prompt in FINAL_RESPONDER_PROMPT],
-        *messages,  # full history here
-        *[m for m in messages_with_tool_calls if m["role"] == "tool"],
-    ]
+                for tool_call in res.choices[0].message.tool_calls:
+                    null = None  # For JSON null
+                    print(
+                        f"Performing tool call with chosen function: {tool_call.function.name}. The following params were supplied: {tool_call.function.arguments}"
+                    )
+                    chosen_fn = eval(f"ChatFn.{tool_call.function.name}")
+                    params = json.loads(f"{tool_call.function.arguments}")
+                    fn_res = chosen_fn(**params)
+                    print(f"Function response: {fn_res}")
 
-    final_res = completion(
-        model="ollama_chat/llama3-groq-tool-use:8b",
-        messages=final_messages,
-        api_base="http://localhost:11434",
-        stream=False,
-        temperature=0.3,
-    )
+                    formatted_messages.append(
+                        {
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": tool_call.function.name,
+                            "content": str(fn_res),
+                        }
+                    )
 
-    return final_res.choices[0].message.content
+                # Attempt to get new completion with tool responses
+                max_tries = 3
+                tries = 1
+                tool_called = False  # Reset before checking
+                while tries <= max_tries:
+                    res = completion(
+                        model="ollama_chat/llama3-groq-tool-use:8b",
+                        messages=formatted_messages,
+                        api_base="http://localhost:11434",
+                        stream=False,
+                        tools=tools,
+                    )
+                    print(res)
+
+                    # Update based on new response
+                    if res.choices[0].message.content is not None:
+                        print("Response generated")
+                        response = res.choices[0].message.content
+                        break
+
+                    if res.choices[0].message.tool_calls:
+                        print("More tool calls required")
+                        print(formatted_messages)
+                        tool_called = True
+                        break
+
+                    tries += 1
+
+                if tries > max_tries:
+                    response = "There was some problem. Please ask your query again."
+                    break
+
+        return response
+
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 
 def export_all_threads() -> str:
