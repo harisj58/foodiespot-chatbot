@@ -16,12 +16,13 @@ litellm.set_verbose = False
 TOOL_DECIDER_PROMPT = """
 You are a highly logical assistant whose sole job is to decide if tool use is absolutely necessary.
 You must:
-- Use tools only if strictly needed (e.g., user asks for live data or dynamic actions).
+- Use tools when needed (e.g., user asks for live data or dynamic actions). If you are confused whether user is asking live or stale data, always assume they are asking for live data and use tools to fetch the latest data available.
 - Use tools if and only if the answer is unavailable via built-in knowledge.
 - Do NOT hallucinate tool usage.
 - If a tool is needed, use the most appropriate tool with precise arguments.
 - You can call multiple tools if the query requires it.
 - Reply with tool calls OR an assistant message – not both.
+- Do NOT skip on tool usage by looking at past conversation and coming up with made up response.
 
 === EXAMPLES ===
 User: "What's the weather in Paris?"
@@ -211,7 +212,7 @@ def test_model_connection():
     """Test if the Ollama model is available"""
     try:
         response = completion(
-            model="ollama/llama3.1:8b",
+            model="ollama_chat/llama3-groq-tool-use:8b",
             messages=[{"role": "user", "content": "Hello"}],
             api_base="http://localhost:11434",
             stream=False,
@@ -241,9 +242,13 @@ def parse_thinking_response(text):
 
 
 def get_response(messages):
+    # Only pass the last message to the tooling agent phases
+    last_message = messages[-1:]  # last message as a list
+
+    # Base messages for tool decision phase with only last message
     base_messages = [
         {"role": "system", "content": TOOL_DECIDER_PROMPT},
-        *messages,
+        *last_message,
     ]
 
     tools = [
@@ -299,10 +304,33 @@ def get_response(messages):
                 }
             )
 
-        # Ask if more tool calls are needed
+        # For the next tool call, keep system prompt + last user/assistant message + tool results only
+        # Extract last user/assistant message from messages_with_tool_calls:
+        # Since we only append new tool calls and results after last message, get last non-system message:
+        # But safest: only keep system prompt + last user/assistant + all tool results so far
+
+        # Get all tool messages
+        tool_msgs = [m for m in messages_with_tool_calls if m["role"] == "tool"]
+
+        # Find last user or assistant message after system prompt
+        last_ua_msg = None
+        for m in reversed(messages_with_tool_calls):
+            if m["role"] in ("user", "assistant") and "tool_calls" not in m:
+                last_ua_msg = m
+                break
+        if last_ua_msg is None:
+            # fallback to last_message from start
+            last_ua_msg = last_message[0]
+
+        tool_phase_messages = [
+            {"role": "system", "content": TOOL_DECIDER_PROMPT},
+            last_ua_msg,
+            *tool_msgs,
+        ]
+
         res = completion(
             model="ollama_chat/llama3-groq-tool-use:8b",
-            messages=messages_with_tool_calls,
+            messages=tool_phase_messages,
             api_base="http://localhost:11434",
             stream=False,
             tools=tools,
@@ -318,7 +346,7 @@ def get_response(messages):
     print("📦 Generating final response...")
     final_messages = [
         {"role": "system", "content": FINAL_RESPONDER_PROMPT},
-        *messages,
+        *messages,  # full history here
         *[m for m in messages_with_tool_calls if m["role"] == "tool"],
     ]
 
