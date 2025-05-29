@@ -38,6 +38,24 @@ class ChatbotFunctions:
                 "required": ["area"],
             },
         },
+        "recommend_restaurants": {
+            "name": "recommend_restaurants",
+            "description": "Recommend restaurants using various filters. Use this function to recommend restaurants to users based on the filters acquired so far.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "area": {
+                        "type": "string",
+                        "description": "The area in Bengaluru the user wants to lookup the FoodieSpot joint in. e.g.: 'Koramangala', 'Whitefield' etc.",
+                    },
+                    "cuisine": {
+                        "type": "string",
+                        "description": "The type of food the user wishes to have during their dine-out. e.g.: 'South Indian', 'Mediterranean' etc.",
+                    },
+                },
+                "required": ["area"],
+            },
+        },
     }
 
     __restaurants_data = json.load(open("./data/restaurants_data.json", "r"))
@@ -91,6 +109,44 @@ class ChatbotFunctions:
                 cuisines.update(cuisine_field)
 
         return f"Here is a list of cuisines available at location {area}: {sorted(cuisines)}\n\nUse this list to show the various cuisine options available in an area. If the list is empty, ask the user to pick some other area."
+
+    @classmethod
+    def recommend_restaurants(cls, area: str, cuisine: str = None) -> str:
+        """
+        Recommend restaurants in a given area, optionally filtered by cuisine.
+
+        Args:
+            area (str): The area in Bengaluru to search restaurants in.
+            data (list): List of restaurant dictionaries.
+            cuisine (str, optional): The cuisine to filter by. Defaults to None.
+
+        Returns:
+            list: List of recommended restaurants (each as a dict).
+        """
+        recommendations = []
+
+        for restaurant in cls.__restaurants_data:
+            rest_location = restaurant.get("location", {}).get("area", "").lower()
+            rest_cuisines = restaurant.get("cuisine", "")
+
+            if area.lower() in rest_location:
+                if cuisine:
+                    # Normalize and match cuisine
+                    if isinstance(rest_cuisines, str):
+                        cuisine_list = [
+                            c.strip().lower() for c in rest_cuisines.split(",")
+                        ]
+                    elif isinstance(rest_cuisines, list):
+                        cuisine_list = [c.strip().lower() for c in rest_cuisines]
+                    else:
+                        continue
+
+                    if cuisine.lower() not in cuisine_list:
+                        continue  # Skip if cuisine doesn't match
+
+                recommendations.append(restaurant)
+
+        return f"Recommend the following restaurants to the user in a proper format: {recommendations}\n\nAsk the user if he wishes to reserve a table at any of the spots for a particular time spot."
 
     @classmethod
     def get_descriptions(cls):
