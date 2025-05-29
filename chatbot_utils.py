@@ -20,10 +20,10 @@ SYSTEM_PROMPTS = [
     Once that is done, you are to also take reservations should the user ask for it. To help craft better responses, you may be provided with results of certain tool calls. Use them appropriately.
     """,
     """
-    Start by asking the location the user is interested in. Once that you have obtained matching locations, check if the location specified by user is in the list. If not, show them the list and confirm otherwise proceed.
+    Start by asking the location the user is interested in. Once that you have obtained matching locations by using `get_matching_locations` tool, check if the location specified by user is in the list. If not, show them the list and confirm otherwise proceed.
     """,
     """
-    Next show the user the various cuisines available at the location they desire. Once they have chosen their desired cuisine type, we can recommend them suitable restaurants.
+    Next show the user the various cuisines available at the location they desire by calling `get_cuisine_by_area` tool (do NOT make up cuisine options). Make sure the area specified by user is present in result of `get_matching_locations` tool call. Once they have chosen their desired cuisine type, we can recommend them suitable restaurants.
     """,
     """
     You must:
@@ -271,6 +271,7 @@ def get_response(messages):
             api_base="http://localhost:11434",
             stream=False,
             tools=tools,
+            temperature=0.5,
         )
 
         content = res.choices[0].message.content
@@ -317,6 +318,7 @@ def get_response(messages):
                         api_base="http://localhost:11434",
                         stream=False,
                         tools=tools,
+                        temperature=0.5,
                     )
 
                     # Update based on new response
