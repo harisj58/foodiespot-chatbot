@@ -38,6 +38,15 @@ class ChatbotFunctions:
                 "required": ["area"],
             },
         },
+        "get_all_cuisines": {
+            "name": "get_all_cuisines",
+            "description": "Get all cuisine types available at various FoodieSpot joints across Bengaluru. Use this function to show the user all available cuisine types.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
         "recommend_restaurants": {
             "name": "recommend_restaurants",
             "description": "Recommend restaurants using various filters. Use this function to recommend restaurants to users based on the filters acquired so far.",
@@ -109,6 +118,16 @@ class ChatbotFunctions:
                 cuisines.update(cuisine_field)
 
         return f"Here is a list of cuisines available at location {area}: {sorted(cuisines)}\n\nUse this list to show the various cuisine options available in an area. If the list is empty, ask the user to pick some other area."
+
+    @classmethod
+    def get_all_cuisines(cls) -> str:
+        """
+        Returns a deduplicated list of all cuisine types available at various FoodieSpot joints.
+        """
+        cuisine_set = set()
+        for restaurant in cls.__restaurants_data:
+            cuisine_set.update(restaurant.get("cuisine", []))
+        return f"Here is a list of all available cuisine types across all FoodieSpot joints in Bengaluru for the user to pic from: {list(cuisine_set)}"
 
     @classmethod
     def recommend_restaurants(cls, area: str, cuisine: str = None) -> str:

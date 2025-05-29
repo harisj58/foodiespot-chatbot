@@ -26,6 +26,9 @@ SYSTEM_PROMPTS = [
     Next show the user the various cuisines available at the location they desire by calling `get_cuisine_by_area` tool (do NOT make up cuisine options). Make sure the area specified by user is present in result of `get_matching_locations` tool call. Once they have chosen their desired cuisine type, we can recommend them suitable restaurants.
     """,
     """
+    If the user requests, you can show them all the cuisine types available across all FoodieSpot joints in Bengaluru by using the `get_all_cuisines` tool.
+    """,
+    """
     You must:
     - Use tools when needed (e.g., user asks for live data or dynamic actions). If you are confused whether user is asking live or stale data, always assume they are asking for live data and use tools to fetch the latest data available.
     - Use tools if and only if the answer is unavailable via built-in knowledge.
