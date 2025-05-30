@@ -6,65 +6,62 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional
 from ChatbotFunctions import ChatbotFunctions as ChatFn
-from copy import deepcopy
+import ollama
 
 # Configure LiteLLM for Ollama
 litellm.set_verbose = False
 
-# === SYSTEM PROMPTS ===
+# === COMBINED SYSTEM PROMPT ===
+SYSTEM_PROMPT = """
+/no_think
+You are DineMate, a restaurant assistant for FoodieSpot chain in Bengaluru.
 
-SYSTEM_PROMPTS = [
-    """
-    You are the responder agent of FoodieSpot - a chain of restaurants across Bengaluru. Always introduce yourself as DineMate. Your job is to recommend users restaurant options by FoodieSpot based on user's preferences.
-    
-    Once that is done, you are to also take reservations should the user ask for it. To help craft better responses, you may be provided with results of certain tool calls. Use them appropriately.
-    """,
-    """
-    Start by asking the location the user is interested in. Once that you have obtained matching locations by using `get_matching_locations` tool, check if the location specified by user is in the list. If not, show them the list and confirm otherwise proceed.
-    """,
-    """
-    Next show the user the various cuisines available at the location they desire by calling `get_cuisine_by_area` tool (do NOT make up cuisine options). Make sure the area specified by user is present in result of `get_matching_locations` tool call. Once they have chosen their desired cuisine type, we can recommend them suitable restaurants.
-    """,
-    """
-    If the user requests, you can show them all the cuisine types available across all FoodieSpot joints in Bengaluru by using the `get_all_cuisines` tool.
-    """,
-    """
-    You must:
-    - Use tools when needed (e.g., user asks for live data or dynamic actions). If you are confused whether user is asking live or stale data, always assume they are asking for live data and use tools to fetch the latest data available.
-    - Use tools if and only if the answer is unavailable via built-in knowledge.
-    - Do NOT hallucinate tool usage.
-    - If a tool is needed, use the most appropriate tool with precise arguments.
-    - You can call multiple tools if the query requires it.
-    - Reply with tool calls OR an assistant message – not both.
-    - Do NOT skip on tool usage by looking at past conversation and coming up with made up response.
+Core Function
+Help users find FoodieSpot restaurants and make reservations.
 
-    === EXAMPLES ===
-    User: "What's the weather in Paris?"
-    ✅ Tool call is required.
+Essential Rules
+1. **Always ask location first** - Get user's preferred area in Bengaluru
+2. **Verify with tools** - Use `get_matching_locations` to confirm FoodieSpot exists there
+3. **Never guess** - Only use tool results, never make up information
+4. **Empty results = inform user** - If no results, say so and suggest alternatives
+5. **Never indicate ongoing process** - "Let me check the cuisines available at FoodieSpot locations in XYZ. One moment!" This is incorrect. It means you are meant to make a tool call and you skipped it. This will irritate the user. Always make tool calls in such cases to get the relevant information.
+6. **Find alternatives** - If a cuisine that a user is interested in is not served at a location, ALWAYS try to find locations that DO serve that cuisine and let the user know about it. DO NOT leave the user asking for more information, try to obtain it automatically.
 
-    User: "Tell me about the Eiffel Tower."
-    ✅ Answer directly. Tool call is NOT needed.
-    """,
-    """
-    === GUIDELINES ===
+Step-by-Step Process
+1. Ask: "Which area in Bengaluru are you looking for?"
+2. Run: `get_matching_locations` with their area
+3. If found: Use `get_cuisine_by_area` to show food options
+4. When they pick cuisine: Use `recommend_restaurants`
+5. Offer reservation if they want
 
-    1. Use **tool outputs** when present to inform your response. DO NOT fabricate or guess information that the tools have not provided.
-    2. If there are no tool outputs, or they are insufficient, rely entirely on your own internal knowledge to respond as naturally and usefully as possible.
-    3. NEVER mention that tools were used or not used. Just reply normally.
-    4. Do NOT hallucinate facts, names, numbers, or results.
-    5. If you are unclear on what to say, ask the user a clarifying question — do not make assumptions.
-    6. For casual or simple greetings like “hi”, “thanks”, or “bye”, respond politely and briefly. No tools or extra reasoning needed.
-    """,
-    """
-    === ALWAYS FOLLOW THIS STYLE ===
-    - Be natural, friendly, and direct.
-    - If tool results are available, use only what is in them.
-    - If no tools were needed, respond as a normal assistant using your internal knowledge.
-    - If something is missing or unclear in tool outputs, politely tell the user what’s missing or ask for more input.
+Available Tools
+- `get_matching_locations` - Check if FoodieSpot is in their area
+- `get_cuisine_by_area` - Show cuisines available in confirmed area
+- `get_all_cuisines` - List all cuisines across Bengaluru
+- `get_area_by_cuisine` - Find areas with specific cuisine
+- `recommend_restaurants` - Get restaurant recommendations
 
-    Your job is to make the conversation feel seamless and human — not robotic or overly literal.
-    """,
-]
+Response Style
+- Friendly but direct
+- Use numbered lists for options
+- Confirm choices before next step
+- For simple greetings ("hi", "thanks"), respond briefly without tools
+- If tools return nothing, be honest about it
+
+Introduction
+- Tell about yourself in your greeting message
+- When asked what can you do, specify all the functionalities you have and how that benefits the user (DO NOT mention name of tools to user)
+- Try to greet the user in a unique way each time
+
+Key Reminder
+You only know what tools tell you. If unsure, use tools or ask for clarification.
+"""
+
+# Configuration constants
+MAX_TOOL_CALLS_PER_CONVERSATION = 5
+CONTEXT_WINDOW_LIMIT = 20  # Keep last 20 messages
+MIN_FUZZY_MATCH_CONFIDENCE = 70
+
 # Directory for storing threads
 THREADS_DIR = "threads"
 
@@ -78,6 +75,19 @@ def create_threads_directory():
 def get_thread_file_path(thread_id: str) -> str:
     """Get the file path for a thread"""
     return os.path.join(THREADS_DIR, f"{thread_id}.json")
+
+
+def manage_context_window(messages: List[Dict]) -> List[Dict]:
+    """Limit context to recent messages to prevent token overflow"""
+    if len(messages) <= CONTEXT_WINDOW_LIMIT:
+        return messages
+
+    # Keep the first message if it's important context, then recent messages
+    if len(messages) > CONTEXT_WINDOW_LIMIT:
+        # Keep last CONTEXT_WINDOW_LIMIT messages
+        return messages[-CONTEXT_WINDOW_LIMIT:]
+
+    return messages
 
 
 def save_thread(thread_id: str, title: str, messages: List[Dict]) -> bool:
@@ -175,7 +185,9 @@ def generate_thread_title(user_message: str, assistant_response: str) -> str:
     """Generate a concise title for the thread based on the first exchange"""
     try:
         # Create a prompt for title generation
-        title_prompt = f"""Based on this conversation exchange, generate a concise, descriptive title (max 5 words):
+        title_prompt = f"""
+        /no_think
+        Based on this conversation exchange, generate a concise, descriptive title (max 5 words):
 
         User: {user_message[:200]}
         Assistant: {assistant_response[:200]}
@@ -183,7 +195,7 @@ def generate_thread_title(user_message: str, assistant_response: str) -> str:
         Generate only the title, nothing else. Make it descriptive but brief."""
 
         response = completion(
-            model="ollama_chat/llama3-groq-tool-use:8b",
+            model="ollama_chat/qwen3:8b",
             messages=[
                 {
                     "role": "system",
@@ -193,14 +205,21 @@ def generate_thread_title(user_message: str, assistant_response: str) -> str:
             ],
             api_base="http://localhost:11434",
             stream=False,
-            temperature=0.3,
+            temperature=0.1,  # Lower temperature for consistent titles
             max_tokens=20,
         )
 
         if hasattr(response, "choices") and len(response.choices) > 0:
             title = response.choices[0].message.content.strip()
             # Clean up the title
-            title = title.replace('"', "").replace("'", "").strip()
+            title = (
+                title.replace('"', "")
+                .replace("'", "")
+                .replace("<think>", "")
+                .replace("</think>", "")
+                .strip("\n")
+                .strip()
+            )
             # Limit length and ensure it's reasonable
             if len(title) > 50:
                 title = title[:47] + "..."
@@ -223,10 +242,11 @@ def test_model_connection():
     """Test if the Ollama model is available"""
     try:
         response = completion(
-            model="ollama_chat/llama3-groq-tool-use:8b",
+            model="ollama_chat/qwen3:8b",
             messages=[{"role": "user", "content": "Hello"}],
             api_base="http://localhost:11434",
             stream=False,
+            temperature=0.1,
             max_tokens=10,
         )
         return True, "Model is available"
@@ -253,99 +273,148 @@ def parse_thinking_response(text):
 
 
 def get_response(messages):
-    """Get complete response from the model (non-streaming)"""
+    """Get complete response from the model with improved error handling and limits"""
     try:
-        # Prepare messages with system message
-        formatted_messages = [
-            {"role": "system", "content": prompt} for prompt in SYSTEM_PROMPTS
-        ]
-        formatted_messages.extend(messages)
+        # Manage context window to prevent token overflow
+        managed_messages = manage_context_window(messages)
 
+        # Prepare messages with single system message
+        formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        formatted_messages.extend(managed_messages)
+
+        # Format tools for Ollama
         tools = [
             {"type": "function", "function": description}
             for description in ChatFn.get_descriptions()
         ]
 
         response = ""
+        tool_call_count = 0
 
-        res = completion(
-            model="ollama_chat/llama3-groq-tool-use:8b",
+        # Initial completion call
+        res = ollama.chat(
+            model="qwen3:8b",
             messages=formatted_messages,
-            api_base="http://localhost:11434",
-            stream=False,
             tools=tools,
-            temperature=0.5,
+            options={
+                # "temperature": 0.1,
+                "top_p": 0.9,
+                # "num_predict": 1000,  # max_tokens equivalent in Ollama
+            },
+            think=False,
         )
 
-        content = res.choices[0].message.content
-        if res.choices[0].message.tool_calls is None:
-            response = content
+        # Check if there are tool calls in the response
+        if (
+            "message" not in res
+            or "tool_calls" not in res["message"]
+            or not res["message"]["tool_calls"]
+        ):
+            # No tool calls, return the content directly
+            response = res["message"]["content"] if "content" in res["message"] else ""
         else:
-            tool_called = True
-            res_copy = res
-            while tool_called:
+            # Handle tool calls with proper limits and error handling
+            while (
+                "message" in res
+                and "tool_calls" in res["message"]
+                and res["message"]["tool_calls"]
+                and tool_call_count < MAX_TOOL_CALLS_PER_CONVERSATION
+            ):
+                tool_call_count += 1
+                print(f"Tool call #{tool_call_count}")
+
+                # Add assistant message with tool calls
                 formatted_messages.append(
                     {
                         "role": "assistant",
-                        "tool_calls": res.choices[0].message.tool_calls,
+                        "content": res["message"].get("content", ""),
+                        "tool_calls": res["message"]["tool_calls"],
                     }
                 )
 
-                for tool_call in res.choices[0].message.tool_calls:
-                    null = None  # For JSON null
-                    print(
-                        f"Performing tool call with chosen function: {tool_call.function.name}. The following params were supplied: {tool_call.function.arguments}"
-                    )
-                    chosen_fn = eval(f"ChatFn.{tool_call.function.name}")
-                    params = json.loads(f"{tool_call.function.arguments}")
-                    fn_res = chosen_fn(**params)
-                    print(f"Function response: {fn_res}")
+                # Execute all tool calls in this turn
+                tool_results = []
+                for tool_call in res["message"]["tool_calls"]:
+                    try:
+                        function_name = tool_call["function"]["name"]
+                        function_args = tool_call["function"]["arguments"]
 
-                    formatted_messages.append(
-                        {
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": tool_call.function.name,
-                            "content": str(fn_res),
-                        }
-                    )
+                        print(
+                            f"Executing: {function_name} with params: {function_args}"
+                        )
 
-                # Attempt to get new completion with tool responses
-                max_tries = 3
-                tries = 1
-                tool_called = False  # Reset before checking
-                while tries <= max_tries:
-                    res = completion(
-                        model="ollama_chat/llama3-groq-tool-use:8b",
+                        chosen_fn = getattr(ChatFn, function_name)
+
+                        # Parse arguments if they're a string
+                        if isinstance(function_args, str):
+                            params = json.loads(function_args)
+                        else:
+                            params = function_args
+
+                        fn_res = chosen_fn(**params)
+                        print(f"Function response: {fn_res}")
+
+                        # Add tool result message
+                        formatted_messages.append(
+                            {
+                                "role": "tool",
+                                "content": str(fn_res),
+                                "name": function_name,
+                            }
+                        )
+                        tool_results.append(fn_res)
+
+                    except Exception as e:
+                        error_msg = (
+                            f"Tool execution error for {function_name}: {str(e)}"
+                        )
+                        print(error_msg)
+                        formatted_messages.append(
+                            {
+                                "role": "tool",
+                                "content": f"Error: {error_msg}",
+                                "name": function_name,
+                            }
+                        )
+
+                # Get response after tool execution
+                try:
+                    res = ollama.chat(
+                        model="qwen3:8b",
                         messages=formatted_messages,
-                        api_base="http://localhost:11434",
-                        stream=False,
                         tools=tools,
-                        temperature=0.5,
+                        options={
+                            # "temperature": 0.1,
+                            "top_p": 0.9,
+                            # "num_predict": 1000,
+                        },
+                        think=False,
                     )
 
-                    # Update based on new response
-                    if res.choices[0].message.content is not None:
-                        print("Response generated")
-                        response = res.choices[0].message.content
+                    if (
+                        "message" in res
+                        and "content" in res["message"]
+                        and res["message"]["content"]
+                    ):
+                        response = res["message"]["content"]
                         break
 
-                    if res.choices[0].message.tool_calls:
-                        print("More tool calls required")
-                        print(formatted_messages)
-                        tool_called = True
-                        break
-
-                    tries += 1
-
-                if tries > max_tries:
-                    response = "There was some problem. Please ask your query again."
+                except Exception as e:
+                    print(f"Error in follow-up completion: {e}")
+                    response = "I encountered an error processing your request. Please try again."
                     break
+
+            # Handle case where max tool calls exceeded
+            if tool_call_count >= MAX_TOOL_CALLS_PER_CONVERSATION:
+                if not response:
+                    response = "I've reached the maximum number of tool calls for this conversation. Please start a new conversation or rephrase your request."
 
         return response
 
     except Exception as e:
-        return f"Error: {str(e)}"
+        error_msg = f"Error: {str(e)}"
+        print(f"Complete error in get_response: {error_msg}")
+        return error_msg
 
 
 def export_all_threads() -> str:
