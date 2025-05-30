@@ -1,3 +1,5 @@
+# ChatbotFunctions.py - Updated with confidence thresholds and improved matching
+
 import json
 from rapidfuzz import process, fuzz
 
@@ -5,8 +7,11 @@ from rapidfuzz import process, fuzz
 class ChatbotFunctions:
     """
     A class containing all available functions that the LLM can call,
-    along with their OpenAI-format descriptions for function calling.
+    with improved fuzzy matching and confidence thresholds.
     """
+
+    # Configuration
+    MIN_CONFIDENCE_THRESHOLD = 70  # Minimum confidence for fuzzy matching
 
     # OpenAI format function descriptions
     __descriptions_all = {
@@ -47,6 +52,20 @@ class ChatbotFunctions:
                 "required": [],
             },
         },
+        "get_area_by_cuisine": {
+            "name": "get_area_by_cuisine",
+            "description": "Get all the areas serving a specific type of cuisine. Use this function to fetch all FoodieSpot locations serving a specific type of cuisine that the user is interested in.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cuisine": {
+                        "type": "string",
+                        "description": "The particular cuisine type the user is interested in having. e.g.: 'South Indian', 'Mediterranean' etc.",
+                    }
+                },
+                "required": ["cuisine"],
+            },
+        },
         "recommend_restaurants": {
             "name": "recommend_restaurants",
             "description": "Recommend restaurants using various filters. Use this function to recommend restaurants to users based on the filters acquired so far.",
@@ -72,103 +91,265 @@ class ChatbotFunctions:
     @classmethod
     def get_matching_locations(cls, area: str, top_n: int = 5) -> str:
         """
-        Get random FoodieSpot restaurant locations around Bengaluru.
-
-        Returns:
-            str: Random restaurant locations
+        Get matching FoodieSpot restaurant locations with confidence thresholds.
+        Only returns matches above the minimum confidence threshold.
         """
+        try:
+            # Create list of tuples (area, place_dict)
+            area_place_pairs = [
+                (place["location"]["area"], place) for place in cls.__restaurants_data
+            ]
 
-        # Create list of tuples (area, place_dict)
-        area_place_pairs = [
-            (place["location"]["area"], place) for place in cls.__restaurants_data
-        ]
+            # Extract areas list for matching
+            areas = [pair[0] for pair in area_place_pairs]
 
-        # Extract areas list for matching
-        areas = [pair[0] for pair in area_place_pairs]
+            # Get top N matches using RapidFuzz with confidence threshold
+            top_matches = process.extract(
+                area, areas, scorer=fuzz.partial_ratio, limit=top_n
+            )
 
-        # Get top N matches using RapidFuzz's extract with partial_ratio scorer
-        top_matches = process.extract(
-            area, areas, scorer=fuzz.partial_ratio, limit=top_n
-        )
+            # Filter matches by confidence threshold
+            filtered_matches = [
+                (matched_area, score, idx)
+                for matched_area, score, idx in top_matches
+                if score >= cls.MIN_CONFIDENCE_THRESHOLD
+            ]
 
-        results = []
-        for matched_area, score, idx in top_matches:
-            place = area_place_pairs[idx][1]
-            results.append(place["location"]["area"])
+            if not filtered_matches:
+                return f"No FoodieSpot locations found matching '{area}'. Please try a different area name or check spelling."
 
-        return f"Here is a list of the matching areas FoodieSpot is located in: {str(results)}\n\nList these options in a proper numbered fashion to the user and ask him to pick a number as a confirmation. Then, proceed with that area unless the user asks to search for another location."
+            results = []
+            for matched_area, score, idx in filtered_matches:
+                place = area_place_pairs[idx][1]
+                results.append({"area": place["location"]["area"], "confidence": score})
+
+            area_names = [result["area"] for result in results]
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Found {len(results)} matching FoodieSpot locations",
+                    "locations": area_names,
+                    "instruction": "Show these locations as numbered options and ask user to select one",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {"status": "error", "message": f"Error finding locations: {str(e)}"}
+            )
 
     @classmethod
     def get_cuisine_by_area(cls, area: str) -> str:
         """
-        Returns a list of unique cuisines found in the given area.
-
-        Args:
-            area (str): The name of the area/city to filter restaurants.
-
-        Returns:
-            str: A message containing unique cuisines found in the given location.
+        Returns cuisines available in the specified area with improved matching.
         """
-        cuisines = set()
+        try:
+            cuisines = set()
+            area_found = False
 
-        for restaurant in cls.__restaurants_data:
-            rest_location = restaurant.get("location", {}).get("area", "").lower()
-            if area.lower() == rest_location:
-                cuisine_field = restaurant.get("cuisine", [])
-                cuisines.update(cuisine_field)
+            for restaurant in cls.__restaurants_data:
+                rest_location = restaurant.get("location", {}).get("area", "").lower()
+                if area.lower() == rest_location:
+                    area_found = True
+                    cuisine_field = restaurant.get("cuisine", [])
+                    if isinstance(cuisine_field, list):
+                        cuisines.update(cuisine_field)
+                    elif isinstance(cuisine_field, str):
+                        cuisines.add(cuisine_field)
 
-        return f"Here is a list of cuisines available at location {area}: {sorted(cuisines)}\n\nUse this list to show the various cuisine options available in an area. If the list is empty, ask the user to pick some other area."
+            if not area_found:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"Area '{area}' not found. Please use get_matching_locations first to confirm the area.",
+                    }
+                )
+
+            if not cuisines:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"No cuisines found for area '{area}'. Please try another location.",
+                    }
+                )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "area": area,
+                    "cuisines": sorted(list(cuisines)),
+                    "instruction": "Show these cuisines as numbered options for user selection",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {"status": "error", "message": f"Error getting cuisines: {str(e)}"}
+            )
 
     @classmethod
     def get_all_cuisines(cls) -> str:
         """
-        Returns a deduplicated list of all cuisine types available at various FoodieSpot joints.
+        Returns all available cuisine types across all FoodieSpot locations.
         """
-        cuisine_set = set()
-        for restaurant in cls.__restaurants_data:
-            cuisine_set.update(restaurant.get("cuisine", []))
-        return f"Here is a list of all available cuisine types across all FoodieSpot joints in Bengaluru for the user to pic from: {list(cuisine_set)}"
+        try:
+            cuisine_set = set()
+            for restaurant in cls.__restaurants_data:
+                cuisine_field = restaurant.get("cuisine", [])
+                if isinstance(cuisine_field, list):
+                    cuisine_set.update(cuisine_field)
+                elif isinstance(cuisine_field, str):
+                    cuisine_set.add(cuisine_field)
+
+            if not cuisine_set:
+                return json.dumps(
+                    {"status": "error", "message": "No cuisines found in database"}
+                )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "cuisines": sorted(list(cuisine_set)),
+                    "total_count": len(cuisine_set),
+                    "instruction": "Show these cuisines as numbered options for user selection",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {"status": "error", "message": f"Error getting all cuisines: {str(e)}"}
+            )
+
+    @classmethod
+    def get_area_by_cuisine(cls, cuisine: str) -> str:
+        """
+        Returns areas serving the specified cuisine with improved matching.
+        """
+        try:
+            areas = set()
+            cuisine_found = False
+
+            for restaurant in cls.__restaurants_data:
+                cuisine_field = restaurant.get("cuisine", [])
+                restaurant_cuisines = []
+
+                if isinstance(cuisine_field, list):
+                    restaurant_cuisines = [c.lower().strip() for c in cuisine_field]
+                elif isinstance(cuisine_field, str):
+                    restaurant_cuisines = [cuisine_field.lower().strip()]
+
+                if cuisine.lower().strip() in restaurant_cuisines:
+                    cuisine_found = True
+                    area = restaurant.get("location", {}).get("area")
+                    if area:
+                        areas.add(area)
+
+            if not cuisine_found:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"Cuisine '{cuisine}' not found. Use get_all_cuisines to see available options.",
+                    }
+                )
+
+            if not areas:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"No areas found serving '{cuisine}' cuisine.",
+                    }
+                )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "cuisine": cuisine,
+                    "areas": sorted(list(areas)),
+                    "instruction": "Show these areas as numbered options for user selection",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Error finding areas for cuisine: {str(e)}",
+                }
+            )
 
     @classmethod
     def recommend_restaurants(cls, area: str, cuisine: str = None) -> str:
         """
-        Recommend restaurants in a given area, optionally filtered by cuisine.
-
-        Args:
-            area (str): The area in Bengaluru to search restaurants in.
-            data (list): List of restaurant dictionaries.
-            cuisine (str, optional): The cuisine to filter by. Defaults to None.
-
-        Returns:
-            list: List of recommended restaurants (each as a dict).
+        Recommend restaurants with improved filtering and error handling.
         """
-        recommendations = []
+        try:
+            recommendations = []
+            area_found = False
 
-        for restaurant in cls.__restaurants_data:
-            rest_location = restaurant.get("location", {}).get("area", "").lower()
-            rest_cuisines = restaurant.get("cuisine", "")
+            for restaurant in cls.__restaurants_data:
+                rest_location = restaurant.get("location", {}).get("area", "").lower()
 
-            if area.lower() in rest_location:
+                # Check if area matches
+                if area.lower() != rest_location:
+                    continue
+
+                area_found = True
+
+                # If cuisine is specified, filter by cuisine
                 if cuisine:
-                    # Normalize and match cuisine
+                    rest_cuisines = restaurant.get("cuisine", [])
+
                     if isinstance(rest_cuisines, str):
-                        cuisine_list = [
-                            c.strip().lower() for c in rest_cuisines.split(",")
-                        ]
+                        cuisine_list = [rest_cuisines.lower().strip()]
                     elif isinstance(rest_cuisines, list):
-                        cuisine_list = [c.strip().lower() for c in rest_cuisines]
+                        cuisine_list = [c.lower().strip() for c in rest_cuisines]
                     else:
                         continue
 
-                    if cuisine.lower() not in cuisine_list:
+                    if cuisine.lower().strip() not in cuisine_list:
                         continue  # Skip if cuisine doesn't match
 
+                # Add restaurant to recommendations
                 recommendations.append(restaurant)
 
-        return f"Recommend the following restaurants to the user in a proper format: {recommendations}\n\nAsk the user if he wishes to reserve a table at any of the spots for a particular time spot."
+            if not area_found:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"Area '{area}' not found. Please use get_matching_locations first.",
+                    }
+                )
+
+            if not recommendations:
+                cuisine_msg = f" serving '{cuisine}' cuisine" if cuisine else ""
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"No restaurants found in '{area}'{cuisine_msg}.",
+                    }
+                )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "area": area,
+                    "cuisine": cuisine,
+                    "restaurants": recommendations,
+                    "count": len(recommendations),
+                    "instruction": "Present these restaurants to the user and ask if they want to make a reservation",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Error getting restaurant recommendations: {str(e)}",
+                }
+            )
 
     @classmethod
     def get_descriptions(cls):
-        descriptions = cls.__descriptions_all.copy()
-
-        return descriptions.values()
+        """Return function descriptions for tool calling"""
+        return cls.__descriptions_all.values()
