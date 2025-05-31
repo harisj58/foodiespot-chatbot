@@ -65,6 +65,43 @@ class ChatbotFunctions:
                 "required": ["cuisine"],
             },
         },
+        "get_area_by_ambience": {
+            "name": "get_area_by_ambience",
+            "description": "Get all the areas that have restaurants with a specific ambience. Use this function to fetch all FoodieSpot locations with a specific ambience that the user is interested in.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ambience": {
+                        "type": "string",
+                        "description": "The particular ambience type the user is interested in. e.g.: 'Trendy', 'Casual', 'Fine Dining' etc.",
+                    }
+                },
+                "required": ["ambience"],
+            },
+        },
+        "get_ambience_by_area": {
+            "name": "get_ambience_by_area",
+            "description": "Get the types of ambience available at restaurants in a particular area in Bengaluru. Use this function to show ambience options for a specific area. Make sure the area you are looking for is exactly the same as the one you get from `get_matching_locations`.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "area": {
+                        "type": "string",
+                        "description": "The area in Bengaluru the user wants to lookup the FoodieSpot joint ambience in. e.g.: 'Koramangala', 'Whitefield' etc.",
+                    }
+                },
+                "required": ["area"],
+            },
+        },
+        "get_all_ambiences": {
+            "name": "get_all_ambiences",
+            "description": "Get all ambience types available at various FoodieSpot joints across Bengaluru. Use this function to show the user all available ambience types.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
         "recommend_restaurants": {
             "name": "recommend_restaurants",
             "description": "Recommend restaurants using various filters. Use this function to recommend restaurants to users based on the filters acquired so far.",
@@ -78,6 +115,10 @@ class ChatbotFunctions:
                     "cuisine": {
                         "type": "string",
                         "description": "The type of food the user wishes to have during their dine-out. e.g.: 'South Indian', 'Mediterranean' etc.",
+                    },
+                    "ambience": {
+                        "type": "string",
+                        "description": "The type of ambience the user prefers for their dining experience. e.g.: 'Trendy', 'Casual', 'Fine Dining' etc.",
                     },
                 },
                 "required": ["area"],
@@ -326,13 +367,183 @@ class ChatbotFunctions:
             )
 
     @classmethod
-    def recommend_restaurants(cls, area: str, cuisine: str = None) -> str:
+    def get_area_by_ambience(cls, ambience: str) -> str:
+        """
+        Returns areas that have restaurants with the specified ambience using fuzzy matching.
+        """
+        try:
+            # Get all unique ambiences from restaurants
+            all_ambiences = []
+            restaurant_ambience_map = {}
+
+            for restaurant in cls.__restaurants_data:
+                rest_ambience = restaurant.get("ambience", "")
+                if rest_ambience:
+                    all_ambiences.append(rest_ambience)
+                    if rest_ambience not in restaurant_ambience_map:
+                        restaurant_ambience_map[rest_ambience] = []
+                    restaurant_ambience_map[rest_ambience].append(restaurant)
+
+            if not all_ambiences:
+                return json.dumps(
+                    {"status": "error", "message": "No ambience data found in database"}
+                )
+
+            # Use fuzzy matching to find the best ambience match
+            best_match = process.extractOne(
+                ambience, all_ambiences, scorer=fuzz.partial_ratio
+            )
+
+            if not best_match or best_match[1] < cls.MIN_CONFIDENCE_THRESHOLD:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"Ambience '{ambience}' not found. Use get_all_ambiences to see available options.",
+                    }
+                )
+
+            matched_ambience = best_match[0]
+            areas = set()
+
+            # Get all areas that have restaurants with this ambience
+            for restaurant in restaurant_ambience_map[matched_ambience]:
+                area = restaurant.get("location", {}).get("area")
+                if area:
+                    areas.add(area)
+
+            if not areas:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"No areas found with '{matched_ambience}' ambience.",
+                    }
+                )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "ambience": matched_ambience,
+                    "areas": sorted(list(areas)),
+                    "confidence": best_match[1],
+                    "instruction": "Show these areas as numbered options for user selection",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": f"Error finding areas for ambience: {str(e)}",
+                }
+            )
+
+    @classmethod
+    def get_ambience_by_area(cls, area: str) -> str:
+        """
+        Returns ambiences available in the specified area.
+        """
+        try:
+            ambiences = set()
+            area_found = False
+
+            for restaurant in cls.__restaurants_data:
+                rest_location = restaurant.get("location", {}).get("area", "").lower()
+                if area.lower() == rest_location:
+                    area_found = True
+                    ambience = restaurant.get("ambience", "")
+                    if ambience:
+                        ambiences.add(ambience)
+
+            if not area_found:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"Area '{area}' not found. Please use get_matching_locations first to confirm the area.",
+                    }
+                )
+
+            if not ambiences:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": f"No ambience data found for area '{area}'. Please try another location.",
+                    }
+                )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "area": area,
+                    "ambiences": sorted(list(ambiences)),
+                    "instruction": "Show these ambiences as numbered options for user selection",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {"status": "error", "message": f"Error getting ambiences: {str(e)}"}
+            )
+
+    @classmethod
+    def get_all_ambiences(cls) -> str:
+        """
+        Returns all available ambience types across all FoodieSpot locations.
+        """
+        try:
+            ambience_set = set()
+            for restaurant in cls.__restaurants_data:
+                ambience = restaurant.get("ambience", "")
+                if ambience:
+                    ambience_set.add(ambience)
+
+            if not ambience_set:
+                return json.dumps(
+                    {"status": "error", "message": "No ambience data found in database"}
+                )
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "ambiences": sorted(list(ambience_set)),
+                    "total_count": len(ambience_set),
+                    "instruction": "Show these ambiences as numbered options for user selection",
+                }
+            )
+
+        except Exception as e:
+            return json.dumps(
+                {"status": "error", "message": f"Error getting all ambiences: {str(e)}"}
+            )
+
+    @classmethod
+    def recommend_restaurants(
+        cls, area: str, cuisine: str = None, ambience: str = None
+    ) -> str:
         """
         Recommend restaurants with improved filtering and error handling.
+        Now supports filtering by area, cuisine, and ambience.
         """
         try:
             recommendations = []
             area_found = False
+            matched_ambience = None
+
+            # If ambience is provided, find the best fuzzy match first
+            if ambience:
+                all_ambiences = [
+                    r.get("ambience", "")
+                    for r in cls.__restaurants_data
+                    if r.get("ambience")
+                ]
+                if all_ambiences:
+                    best_ambience_match = process.extractOne(
+                        ambience, all_ambiences, scorer=fuzz.partial_ratio
+                    )
+                    if (
+                        best_ambience_match
+                        and best_ambience_match[1] >= cls.MIN_CONFIDENCE_THRESHOLD
+                    ):
+                        matched_ambience = best_ambience_match[0]
 
             for restaurant in cls.__restaurants_data:
                 rest_location = restaurant.get("location", {}).get("area", "").lower()
@@ -357,6 +568,15 @@ class ChatbotFunctions:
                     if cuisine.lower().strip() not in cuisine_list:
                         continue  # Skip if cuisine doesn't match
 
+                # If ambience is specified, filter by ambience
+                if ambience and matched_ambience:
+                    rest_ambience = restaurant.get("ambience", "")
+                    if (
+                        rest_ambience.lower().strip()
+                        != matched_ambience.lower().strip()
+                    ):
+                        continue  # Skip if ambience doesn't match
+
                 # Add restaurant to recommendations
                 recommendations.append(restaurant)
 
@@ -369,24 +589,37 @@ class ChatbotFunctions:
                 )
 
             if not recommendations:
-                cuisine_msg = f" serving '{cuisine}' cuisine" if cuisine else ""
+                filters = []
+                if cuisine:
+                    filters.append(f"serving '{cuisine}' cuisine")
+                if ambience and matched_ambience:
+                    filters.append(f"with '{matched_ambience}' ambience")
+                elif ambience and not matched_ambience:
+                    filters.append(f"with '{ambience}' ambience (no close match found)")
+
+                filter_msg = " " + " and ".join(filters) if filters else ""
+
                 return json.dumps(
                     {
                         "status": "error",
-                        "message": f"No restaurants found in '{area}'{cuisine_msg}.",
+                        "message": f"No restaurants found in '{area}'{filter_msg}.",
                     }
                 )
 
-            return json.dumps(
-                {
-                    "status": "success",
-                    "area": area,
-                    "cuisine": cuisine,
-                    "restaurants": recommendations,
-                    "count": len(recommendations),
-                    "instruction": "Present these restaurants to the user and ask if they want to make a reservation",
-                }
-            )
+            result = {
+                "status": "success",
+                "area": area,
+                "restaurants": recommendations,
+                "count": len(recommendations),
+                "instruction": "Present these restaurants to the user and ask if they want to make a reservation",
+            }
+
+            if cuisine:
+                result["cuisine"] = cuisine
+            if ambience and matched_ambience:
+                result["ambience"] = matched_ambience
+
+            return json.dumps(result)
 
         except Exception as e:
             return json.dumps(
