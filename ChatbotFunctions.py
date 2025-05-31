@@ -1,7 +1,6 @@
-# ChatbotFunctions.py - Updated with confidence thresholds and improved matching
-
 import json
 from rapidfuzz import process, fuzz
+import re
 
 
 class ChatbotFunctions:
@@ -84,9 +83,57 @@ class ChatbotFunctions:
                 "required": ["area"],
             },
         },
+        "make_reservation": {
+            "name": "make_reservation",
+            "description": "Reserve a table for the user at a specific FoodieSpot location. Use this function to allow the user to make a reservation at their desired FoodieSpot joint.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "restaurant": {
+                        "type": "string",
+                        "description": "The name of the FoodieSpot joint the user wishes to make a reservation at. Ensure it is the one the user wishes to dine at. e.g. 'FoodieSpot - Marathahalli', 'FoodieSpot - Rajajinagar' etc.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The full name of the user.",
+                    },
+                    "phone_number": {
+                        "type": "string",
+                        "description": "The phone number of the user.",
+                    },
+                    "headcount": {
+                        "type": "number",
+                        "description": "The number of people who will be dining.",
+                    },
+                    "time_slot": {
+                        "type": "object",
+                        "description": "The time slot for which the user is making a booking at the restaurant. Must be 24-hour time only. If unclear, ask the user to specify AM or PM.",
+                        "properties": {
+                            "hour": {
+                                "type": "number",
+                                "description": "The hour at which the user will be arriving at the restaurant. Use 24-hour time only. If unclear, ask the user to specify AM or PM.",
+                            },
+                            "minute": {
+                                "type": "number",
+                                "description": "The minute at which the user will be arriving at the restaurant. Use 24-hour time only. If unclear, ask the user to specify AM or PM.",
+                            },
+                        },
+                        "required": ["hour", "minute"],
+                    },
+                },
+                "required": [
+                    "restaurant",
+                    "name",
+                    "phone_number",
+                    "headcount",
+                    "time_slot",
+                ],
+            },
+        },
     }
 
     __restaurants_data = json.load(open("./data/restaurants_data.json", "r"))
+    __reservations_data = json.load(open("./data/reservations_data.json", "r"))
 
     @classmethod
     def get_matching_locations(cls, area: str, top_n: int = 5) -> str:
@@ -348,6 +395,100 @@ class ChatbotFunctions:
                     "message": f"Error getting restaurant recommendations: {str(e)}",
                 }
             )
+
+    @classmethod
+    def make_reservation(
+        cls,
+        restaurant,
+        name,
+        phone_number,
+        headcount,
+        time_slot,
+    ):
+        # 1. Validate restaurant
+        matching_restaurant = next(
+            (r for r in cls.__restaurants_data if r["name"] == restaurant), None
+        )
+        if not matching_restaurant:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Invalid restaurant name. Please choose a valid FoodieSpot location.",
+                }
+            )
+
+        # 2. Validate phone number
+        if not (
+            isinstance(phone_number, str) and re.fullmatch(r"\d{10}", phone_number)
+        ):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Invalid phone number. It must be a 10-digit number.",
+                }
+            )
+
+        # 3. Validate headcount
+        if not isinstance(headcount, int) or headcount <= 0:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Invalid headcount. It must be a positive number.",
+                }
+            )
+        if headcount > matching_restaurant["seating_capacity"]:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"Requested headcount exceeds seating capacity of {matching_restaurant['seating_capacity']}.",
+                }
+            )
+
+        # 4. Validate time_slot
+        if not isinstance(time_slot, dict):
+            return json.dumps(
+                {"success": False, "error": "Missing or invalid time_slot."}
+            )
+
+        hour = time_slot.get("hour")
+        minute = time_slot.get("minute")
+
+        if not (isinstance(hour, int) and 0 <= hour <= 23):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Invalid 'hour' in time_slot. Must be between 0 and 23.",
+                }
+            )
+        if not (isinstance(minute, int) and 0 <= minute <= 59):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Invalid 'minute' in time_slot. Must be between 0 and 59.",
+                }
+            )
+
+        # Passed all validations
+        new_reservation = {
+            "restaurant": restaurant,
+            "name": name,
+            "phone_number": phone_number,
+            "headcount": headcount,
+            "time_slot": {"hour": hour, "minute": minute},
+        }
+
+        cls.__reservations_data.append(new_reservation)
+        with open("./data/reservations_data.json", "w") as file:
+            json.dump(cls.__reservations_data, file, indent=2)
+
+        return json.dumps(
+            {
+                "success": True,
+                "message": "Reservation successful!",
+                "reservation": new_reservation,
+            },
+            indent=2,
+        )
 
     @classmethod
     def get_descriptions(cls):
