@@ -6,7 +6,10 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional
 from ChatbotFunctions import ChatbotFunctions as ChatFn
-import ollama
+from ollama import Client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configure LiteLLM for Ollama
 litellm.set_verbose = False
@@ -20,11 +23,11 @@ Core Function
 Help users find FoodieSpot restaurants and make reservations.
 
 Essential Rules
-1. **Always ask location first** - Get user's preferred area in Bengaluru
+1. **Location is required** - You cannot recommend a restaurant without first having known the location in Bengaluru. The user might not always have a preferred location so guide him by showing locations he may be interested by using tools accordingly
 2. **Verify with tools** - Use `get_matching_locations` to confirm FoodieSpot exists there
 3. **Never guess** - Only use tool results, never make up information
 4. **Empty results = inform user** - If no results, say so and suggest alternatives
-5. **Never indicate ongoing process** - DO NOT respond like: "Let me check the cuisines available at FoodieSpot locations in XYZ. One moment!" This is incorrect. It means you are meant to make a tool call and you skipped it. This will irritate the user. Always make tool calls in such cases to get the relevant information and then make the final response.
+5. **Never indicate ongoing process** - DO NOT respond like: "Let me check the cuisines available at FoodieSpot locations in XYZ. One moment!" This is incorrect. It means you are meant to make a tool call and you skipped it. This will irritate the user. Always make tool calls to get the relevant information before making the final response.
 6. **Find alternatives** - If a cuisine that a user is interested in is not served at a location, ALWAYS try to find locations that DO serve that cuisine and let the user know about it. DO NOT leave the user asking for more information, try to obtain it automatically.
 
 Available Tools
@@ -32,7 +35,12 @@ Available Tools
 - `get_cuisine_by_area` - Show cuisines available in confirmed area
 - `get_all_cuisines` - List all cuisines across Bengaluru
 - `get_area_by_cuisine` - Find areas with specific cuisine
-- `recommend_restaurants` - Get restaurant recommendations
+- `get_area_by_ambience` - Find areas with specific ambience
+- `get_ambience_by_area` - Show ambience available in confirmed area
+- `get_all_ambiences` - List all ambiences across Bengaluru
+- `recommend_restaurants` - Get restaurant recommendations (area is required for this but ambience and cuisine are optional)
+
+Feel free to make sequential tool calls (one tool call after another) to obtain next piece of information so as to better help the user without the user asking explicitly. That makes you a better restaurant assistant.
 
 Response Style
 - Friendly but direct
@@ -46,6 +54,7 @@ Introduction
 - When asked what can you do, specify all the functionalities you have and how that benefits the user (DO NOT mention name of tools to user)
 - Try to greet the user in a unique way each time
 - Guide the user towards picking a restaurant, ask if they want to dine at a location or if they are in the mood for having a specific type of cuisine
+- The user can also look up ambiences in the city and pick a reservation according to that
 
 Reservation making process
 - You need the following data to make a reservation for the user:
@@ -67,6 +76,10 @@ MIN_FUZZY_MATCH_CONFIDENCE = 70
 
 # Directory for storing threads
 THREADS_DIR = "threads"
+
+client = Client(
+    host=os.environ.get("LLM_BASE_URL", "http://localhost:11434"),
+)
 
 
 def create_threads_directory():
@@ -198,7 +211,8 @@ def generate_thread_title(user_message: str, assistant_response: str) -> str:
         Generate only the title, nothing else. Make it descriptive but brief."""
 
         response = completion(
-            model="ollama_chat/qwen3:8b",
+            base_url=os.environ.get("LLM_BASE_URL", "http://localhost:11434"),
+            model="ollama_chat/qwen3:8b-fp16",
             messages=[
                 {
                     "role": "system",
@@ -245,7 +259,7 @@ def test_model_connection():
     """Test if the Ollama model is available"""
     try:
         response = completion(
-            model="ollama_chat/qwen3:8b",
+            model="ollama_chat/qwen3:8b-fp16",
             messages=[{"role": "user", "content": "Hello"}],
             api_base="http://localhost:11434",
             stream=False,
@@ -295,8 +309,8 @@ def get_response(messages):
         tool_call_count = 0
 
         # Initial completion call
-        res = ollama.chat(
-            model="qwen3:8b",
+        res = client.chat(
+            model="qwen3:8b-fp16",
             messages=formatted_messages,
             tools=tools,
             options={
@@ -382,8 +396,8 @@ def get_response(messages):
 
                 # Get response after tool execution
                 try:
-                    res = ollama.chat(
-                        model="qwen3:8b",
+                    res = client.chat(
+                        model="qwen3:8b-fp16",
                         messages=formatted_messages,
                         tools=tools,
                         options={
