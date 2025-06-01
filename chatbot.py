@@ -1,10 +1,10 @@
 import streamlit as st
 import json
-import os
 import uuid
 from datetime import datetime
 from chatbot_utils import (
-    get_response,  # Changed from get_response_stream
+    get_response_stream,  # New streaming function
+    get_response,  # Keep non-streaming for compatibility
     test_model_connection,
     parse_thinking_response,
     generate_thread_title,
@@ -35,6 +35,8 @@ if "current_thread_title" not in st.session_state:
     st.session_state.current_thread_title = "New Chat"
 if "threads_list" not in st.session_state:
     st.session_state.threads_list = get_all_threads()
+if "streaming_enabled" not in st.session_state:
+    st.session_state.streaming_enabled = True
 
 
 def create_new_thread():
@@ -100,6 +102,19 @@ def display_thinking_section(thinking_content):
 # Sidebar
 with st.sidebar:
     st.header("🤖 FoodieSpot Chatbot")
+
+    # Streaming toggle
+    st.subheader("⚙️ Settings")
+    streaming_enabled = st.toggle(
+        "Enable Streaming",
+        value=st.session_state.streaming_enabled,
+        help="Stream responses in real-time vs complete responses",
+    )
+    if streaming_enabled != st.session_state.streaming_enabled:
+        st.session_state.streaming_enabled = streaming_enabled
+        st.rerun()
+
+    st.divider()
 
     # Thread management
     st.subheader("💬 Threads")
@@ -226,13 +241,13 @@ with st.sidebar:
     # Info section
     st.subheader("ℹ️ About")
     st.markdown(
-        """
-    This chatbot uses Llama3 Groq Tool Use 8B model running locally via Ollama.
+        f"""
+    This chatbot uses Qwen3 8B model running locally via Ollama.
     
     **Features:**
+    - {'🔥 **Streaming responses**' if st.session_state.streaming_enabled else '📄 Complete responses'}
     - Thread-based conversations
     - Automatic title generation
-    - Complete responses (non-streaming)
     - Thought process visibility
     - Chat history export
     - Local AI processing
@@ -246,7 +261,11 @@ st.title("💬 FoodieSpot Chat")
 if not st.session_state.current_thread_id:
     create_new_thread()
 
-st.caption(f"Thread: {st.session_state.current_thread_title}")
+# Display streaming status
+streaming_status = (
+    "🔥 Streaming Mode" if st.session_state.streaming_enabled else "📄 Complete Mode"
+)
+st.caption(f"Thread: {st.session_state.current_thread_title} | {streaming_status}")
 
 # Quick start instructions in expander
 with st.expander("📋 Quick Start Guide"):
@@ -255,117 +274,158 @@ with st.expander("📋 Quick Start Guide"):
     **Prerequisites:**
     1. Install Ollama: `curl -fsSL https://ollama.ai/install.sh | sh`
     2. Start Ollama: `ollama serve`
-    3. Pull Deepseek model: `ollama pull llama3-groq-tool-use:8b`
-    4. Install dependencies: `pip install streamlit litellm`
+    3. Pull Qwen3 model: `ollama pull qwen3:8b-fp16`
+    4. Install dependencies: `pip install streamlit litellm ollama python-dotenv`
     
     **Features:**
+    - **Streaming Responses**: Toggle between streaming and complete responses
     - **Threads**: Each conversation is saved as a separate thread
     - **Auto Titles**: Thread titles are automatically generated from the first message
     - **Persistent Storage**: All threads are saved locally in the `threads/` directory
-    - **Thread Management**: Create, switch between, and delete threads easily
-    - **Non-streaming**: Complete responses are loaded at once
-    
-    **Usage:**
-    - Click "➕ New Thread" to start a fresh conversation
-    - Click on any thread in the sidebar to switch to it
-    - Thread titles are generated automatically after the first exchange
-    - Use 🗑️ to delete unwanted threads
-    - Export individual thread conversations as JSON
-    
-    **Files needed:**
-    - `chatbot.py` (main application)
-    - `chatbot_utils.py` (utility functions)
-    - `threads/` directory (created automatically)
+    - **Thread Management**: Create, switch between, and delete threads
     """
     )
 
-# Display chat messages from history
+# Display chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         if message["role"] == "assistant":
-            # Display thinking section if it exists
-            if "thinking" in message and message["thinking"]:
-                display_thinking_section(message["thinking"])
-        # Display the main content
-        st.markdown(message["content"])
+            # Parse thinking content if it exists
+            content = message["content"]
+            thinking_content, main_response = parse_thinking_response(content)
+
+            # Display thinking section if available
+            display_thinking_section(thinking_content)
+
+            # Display main response
+            st.markdown(main_response)
+        else:
+            st.markdown(message["content"])
 
 # Chat input
-if prompt := st.chat_input("What would you like to know?"):
-    # Add user message to chat history and display it
+if prompt := st.chat_input("Type your message here..."):
+    # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
 
+    # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Generate and display assistant response
+    # Generate assistant response
     with st.chat_message("assistant"):
-        try:
-            # Show loading indicator
-            with st.spinner("AI is thinking..."):
-                # Get complete response (non-streaming)
-                full_response = get_response(st.session_state.messages)
+        if st.session_state.streaming_enabled:
+            # Streaming response
+            response_placeholder = st.empty()
+            thinking_placeholder = st.empty()
 
-            if full_response.startswith("Error:"):
-                st.error(full_response)
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": full_response}
-                )
-            else:
-                # Parse the complete response
+            full_response = ""
+            tool_output_buffer = ""
+            current_section = "response"  # Track if we're in tool output or response
+
+            try:
+                for chunk in get_response_stream(st.session_state.messages):
+                    if chunk:
+                        # Check if this is a tool execution indicator
+                        if (
+                            chunk.startswith("🔧")
+                            or chunk.startswith("📊")
+                            or chunk.startswith("❌")
+                        ):
+                            # Tool execution output
+                            tool_output_buffer += chunk
+                            current_section = "tools"
+
+                            # Update thinking section with tool output
+                            with thinking_placeholder.container():
+                                with st.expander("🛠️ Tool Execution", expanded=True):
+                                    st.markdown(tool_output_buffer)
+
+                        elif chunk.startswith("✨ **Response:**"):
+                            # Switch back to response section
+                            current_section = "response"
+                            full_response = ""  # Reset for clean response
+                            continue
+
+                        else:
+                            # Regular response content
+                            if current_section == "response":
+                                full_response += chunk
+
+                                # Parse and display response with thinking
+                                thinking_content, main_response = (
+                                    parse_thinking_response(full_response)
+                                )
+
+                                # Update the response display
+                                with response_placeholder.container():
+                                    if thinking_content:
+                                        display_thinking_section(thinking_content)
+                                    st.markdown(main_response)
+
+            except Exception as e:
+                st.error(f"Streaming error: {str(e)}")
+                # Fallback to non-streaming
+                full_response = get_response(st.session_state.messages)
                 thinking_content, main_response = parse_thinking_response(full_response)
 
-                final_content = main_response if main_response else full_response
-
-                # Show thinking section if exists
                 if thinking_content:
                     display_thinking_section(thinking_content)
+                st.markdown(main_response)
 
-                # Display final response
-                st.markdown(final_content)
+        else:
+            # Non-streaming response
+            with st.spinner("Generating response..."):
+                full_response = get_response(st.session_state.messages)
 
-                # Add to chat history
-                message_data = {"role": "assistant", "content": final_content}
-                if thinking_content:
-                    message_data["thinking"] = thinking_content
+            # Parse thinking content
+            thinking_content, main_response = parse_thinking_response(full_response)
 
-                st.session_state.messages.append(message_data)
+            # Display thinking section if available
+            display_thinking_section(thinking_content)
 
-                # Generate thread title if this is the first exchange and title is still "New Chat"
-                if (
-                    st.session_state.current_thread_title == "New Chat"
-                    and len(
-                        [m for m in st.session_state.messages if m["role"] == "user"]
-                    )
-                    == 1
-                ):
-                    # Generate title in background
-                    new_title = generate_thread_title(prompt, final_content)
-                    if new_title and new_title != "New Chat":
-                        st.session_state.current_thread_title = new_title
+            # Display main response
+            st.markdown(main_response)
 
-                # Save the thread
-                save_thread(
-                    st.session_state.current_thread_id,
-                    st.session_state.current_thread_title,
-                    st.session_state.messages,
-                )
+    # Add assistant response to chat history
+    # For streaming, we need to ensure we save the complete response
+    if st.session_state.streaming_enabled:
+        # The full_response contains the complete response from streaming
+        final_response = (
+            full_response if "full_response" in locals() else "Response generated"
+        )
+    else:
+        final_response = full_response
 
-                # Update threads list
-                st.session_state.threads_list = get_all_threads()
+    st.session_state.messages.append({"role": "assistant", "content": final_response})
 
-                # Force a rerun to refresh the display
-                st.rerun()
+    # Generate thread title if this is the first exchange
+    if (
+        len(st.session_state.messages) == 2
+    ):  # First user message + first assistant response
+        try:
+            user_msg = st.session_state.messages[0]["content"]
+            assistant_msg = st.session_state.messages[1]["content"]
 
-        except Exception as e:
-            error_msg = f"Sorry, I encountered an error: {str(e)}"
-            st.error(error_msg)
-            st.session_state.messages.append(
-                {"role": "assistant", "content": error_msg}
-            )
+            # Generate title in the background
+            new_title = generate_thread_title(user_msg, assistant_msg)
+            st.session_state.current_thread_title = new_title
+
+            # Update the display
             st.rerun()
+        except Exception as e:
+            print(f"Error generating title: {e}")
+            # Keep default title if generation fails
 
-# Footer
-st.divider()
-st.caption(
-    "🔧 Make sure Ollama is running with `ollama serve` and the Deepseek model is available with `ollama pull llama3-groq-tool-use:8b`"
-)
+    # Save thread after each exchange
+    if st.session_state.current_thread_id:
+        save_thread(
+            st.session_state.current_thread_id,
+            st.session_state.current_thread_title,
+            st.session_state.messages,
+        )
+
+        # Refresh threads list to show updated info
+        st.session_state.threads_list = get_all_threads()
+
+# Auto-scroll behavior note
+st.caption("💡 The chat will automatically scroll to show new messages")

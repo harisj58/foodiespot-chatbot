@@ -4,7 +4,7 @@ import re
 import os
 import json
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Generator
 from ChatbotFunctions import ChatbotFunctions as ChatFn
 from ollama import Client
 from dotenv import load_dotenv
@@ -29,6 +29,7 @@ Essential Rules
 4. **Empty results = inform user** - If no results, say so and suggest alternatives
 5. **Never indicate ongoing process** - DO NOT respond like: "Let me check the cuisines available at FoodieSpot locations in XYZ. One moment!" This is incorrect. It means you are meant to make a tool call and you skipped it. This will irritate the user. Always make tool calls to get the relevant information before making the final response.
 6. **Find alternatives** - If a cuisine that a user is interested in is not served at a location, ALWAYS try to find locations that DO serve that cuisine and let the user know about it. DO NOT leave the user asking for more information, try to obtain it automatically.
+7. **Do not skip tool calls** - DO NOT SKIP tool calls as the user progresses with the chat. You must use tool calls to fetch latest data when user changes his mind about the cuisine, location or even ambience.
 
 Available Tools
 - `get_matching_locations` - Check if FoodieSpot is in their area
@@ -57,6 +58,7 @@ Introduction
 - The user can also look up ambiences in the city and pick a reservation according to that
 
 Reservation making process
+- Always show the full restaurant data by using the `recommend_restaurant` tool before asking the user whether they want to make a reservation there. 
 - You need the following data to make a reservation for the user:
     * The name of the FoodieSpot joint the user wishes to make a reservation at. Ensure it is the one the user wishes to dine at. Infer this from the conversation.
     * The full name of the user.
@@ -220,7 +222,6 @@ def generate_thread_title(user_message: str, assistant_response: str) -> str:
                 },
                 {"role": "user", "content": title_prompt},
             ],
-            api_base="http://localhost:11434",
             stream=False,
             temperature=0.1,  # Lower temperature for consistent titles
             max_tokens=20,
@@ -259,9 +260,9 @@ def test_model_connection():
     """Test if the Ollama model is available"""
     try:
         response = completion(
+            base_url=os.environ.get("LLM_BASE_URL", "http://localhost:11434"),
             model="ollama_chat/qwen3:8b-fp16",
             messages=[{"role": "user", "content": "Hello"}],
-            api_base="http://localhost:11434",
             stream=False,
             temperature=0.1,
             max_tokens=10,
@@ -287,6 +288,199 @@ def parse_thinking_response(text):
     thinking_content = "\n\n".join(thinking_matches) if thinking_matches else None
 
     return thinking_content, main_response
+
+
+def get_response_stream(messages) -> Generator[str, None, None]:
+    """Get streaming response from the model with improved error handling and limits"""
+    try:
+        # Manage context window to prevent token overflow
+        managed_messages = manage_context_window(messages)
+
+        # Prepare messages with single system message
+        formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        formatted_messages.extend(managed_messages)
+
+        # Format tools for Ollama
+        tools = [
+            {"type": "function", "function": description}
+            for description in ChatFn.get_descriptions()
+        ]
+
+        tool_call_count = 0
+        accumulated_response = ""
+
+        # Initial completion call with streaming
+        stream = client.chat(
+            model="qwen3:8b-fp16",
+            messages=formatted_messages,
+            tools=tools,
+            options={
+                "top_p": 0.9,
+            },
+            think=False,
+            stream=True,
+        )
+
+        # Check if we need to handle tool calls or can stream directly
+        first_chunk = next(stream, None)
+        if not first_chunk:
+            yield "Error: No response from model"
+            return
+
+        # If the first chunk has tool calls, we need to handle them first
+        if (
+            "message" in first_chunk
+            and "tool_calls" in first_chunk["message"]
+            and first_chunk["message"]["tool_calls"]
+        ):
+            # Tool calls detected - handle them non-streaming first
+            # Reconstruct the full response for tool handling
+            full_response = first_chunk
+
+            # Continue reading the stream to get complete tool call info
+            for chunk in stream:
+                if "message" in chunk:
+                    if (
+                        "tool_calls" in chunk["message"]
+                        and chunk["message"]["tool_calls"]
+                    ):
+                        # Merge tool calls
+                        if "tool_calls" not in full_response["message"]:
+                            full_response["message"]["tool_calls"] = []
+                        full_response["message"]["tool_calls"].extend(
+                            chunk["message"]["tool_calls"]
+                        )
+
+                    if "content" in chunk["message"] and chunk["message"]["content"]:
+                        if "content" not in full_response["message"]:
+                            full_response["message"]["content"] = ""
+                        full_response["message"]["content"] += chunk["message"][
+                            "content"
+                        ]
+
+            # Handle tool calls
+            while (
+                "message" in full_response
+                and "tool_calls" in full_response["message"]
+                and full_response["message"]["tool_calls"]
+                and tool_call_count < MAX_TOOL_CALLS_PER_CONVERSATION
+            ):
+                tool_call_count += 1
+                yield f"🔧 Executing tools... (Call #{tool_call_count})\n\n"
+
+                # Add assistant message with tool calls
+                formatted_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": full_response["message"].get("content", ""),
+                        "tool_calls": full_response["message"]["tool_calls"],
+                    }
+                )
+
+                # Execute all tool calls in this turn
+                for tool_call in full_response["message"]["tool_calls"]:
+                    try:
+                        function_name = tool_call["function"]["name"]
+                        function_args = tool_call["function"]["arguments"]
+
+                        yield f"📊 Using {function_name}...\n\n"
+
+                        chosen_fn = getattr(ChatFn, function_name)
+
+                        # Parse arguments if they're a string
+                        if isinstance(function_args, str):
+                            params = json.loads(function_args)
+                        else:
+                            params = function_args
+
+                        fn_res = chosen_fn(**params)
+
+                        # Add tool result message
+                        formatted_messages.append(
+                            {
+                                "role": "tool",
+                                "content": str(fn_res),
+                                "name": function_name,
+                            }
+                        )
+
+                    except Exception as e:
+                        error_msg = (
+                            f"Tool execution error for {function_name}: {str(e)}"
+                        )
+                        yield f"❌ {error_msg}\n\n"
+                        formatted_messages.append(
+                            {
+                                "role": "tool",
+                                "content": f"Error: {error_msg}",
+                                "name": function_name,
+                            }
+                        )
+
+                # Get streaming response after tool execution
+                try:
+                    stream = client.chat(
+                        model="qwen3:8b-fp16",
+                        messages=formatted_messages,
+                        tools=tools,
+                        options={
+                            "top_p": 0.9,
+                        },
+                        think=False,
+                        stream=True,
+                    )
+
+                    # Stream the response after tool execution
+                    tool_response_started = False
+                    for chunk in stream:
+                        if "message" in chunk and "content" in chunk["message"]:
+                            content = chunk["message"]["content"]
+                            if content:
+                                if not tool_response_started:
+                                    yield f"✨ **Response:**\n\n"
+                                    tool_response_started = True
+                                accumulated_response += content
+                                yield content
+
+                        # Check if there are more tool calls
+                        if (
+                            "message" in chunk
+                            and "tool_calls" in chunk["message"]
+                            and chunk["message"]["tool_calls"]
+                        ):
+                            full_response = chunk
+                            break
+                    else:
+                        # No more tool calls, we're done
+                        break
+
+                except Exception as e:
+                    yield f"❌ Error in follow-up completion: {str(e)}"
+                    break
+
+            # Handle case where max tool calls exceeded
+            if tool_call_count >= MAX_TOOL_CALLS_PER_CONVERSATION:
+                yield "\n\n⚠️ Maximum tool calls reached. Please start a new conversation."
+
+        else:
+            # No tool calls, stream the response directly
+            if "message" in first_chunk and "content" in first_chunk["message"]:
+                content = first_chunk["message"]["content"]
+                if content:
+                    accumulated_response += content
+                    yield content
+
+            # Continue streaming the rest
+            for chunk in stream:
+                if "message" in chunk and "content" in chunk["message"]:
+                    content = chunk["message"]["content"]
+                    if content:
+                        accumulated_response += content
+                        yield content
+
+    except Exception as e:
+        error_msg = f"❌ Error: {str(e)}"
+        yield error_msg
 
 
 def get_response(messages):
