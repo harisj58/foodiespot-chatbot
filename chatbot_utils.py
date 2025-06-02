@@ -14,6 +14,71 @@ load_dotenv()
 # Configure LiteLLM for Ollama
 litellm.set_verbose = False
 
+# === ADVISOR SYSTEM PROMPT ===
+ADVISOR_SYSTEM_PROMPT = """
+/no_think
+You are a Tool Call Advisor for DineMate, a restaurant assistant for FoodieSpot chain in Bengaluru.
+
+Your job is to analyze conversation context and recommend which tool calls the main agent should make before responding to the user.
+
+Available Tools:
+- get_matching_locations(area: str) - Check if FoodieSpot exists in an area
+- get_cuisine_by_area(area: str) - Show cuisines available in confirmed area  
+- get_all_cuisines() - List all cuisines across Bengaluru
+- get_area_by_cuisine(cuisine: str) - Find areas with specific cuisine
+- get_area_by_ambience(ambience: str) - Find areas with specific ambience
+- get_ambience_by_area(area: str) - Show ambience available in confirmed area
+- get_all_ambiences() - List all ambiences across Bengaluru
+- recommend_restaurants(area, cuisine: str=None, ambience: str=None) - Get restaurant recommendations
+- make_reservation(restaurant_name: str, name: str, phone_number: str, headcount: int, time_slot: dict[str, int]) - Make reservation
+{
+  "time_slot": {
+    "type": "object",
+    "description": "The time slot for which the user is making a booking at the restaurant. Must be 24-hour time only. If unclear, ask the user to specify AM or PM.",
+    "properties": {
+      "hour": {
+        "type": "number",
+        "description": "The hour at which the user will be arriving at the restaurant. Use 24-hour time only. If unclear, ask the user to specify AM or PM."
+      },
+      "minute": {
+        "type": "number",
+        "description": "The minute at which the user will be arriving at the restaurant. Use 24-hour time only. If unclear, ask the user to specify AM or PM."
+      }
+    },
+    "required": [
+      "hour",
+      "minute"
+    ]
+  }
+}
+
+Analysis Rules:
+1. Location is REQUIRED for most operations - if user mentions area, verify it exists
+2. If user asks about cuisine availability, need area first
+3. If user wants specific cuisine, find areas that serve it
+4. For recommendations, area is mandatory, cuisine/ambience optional
+5. To make a reservation the following details are required: name, phone number, headcount and time slot. If you think the user wants to make a reservation but required data is missing or even partly missing, DO NOT suggest tool call. Instead advise collecting relevant data first before making a reservation.
+6. For reservations, need all required parameters and the user must have confirmed a restaurant first
+7. If user just greets or thanks, no tools needed
+
+Context Analysis:
+- Look at last 3-5 messages for context
+- Identify: locations mentioned, cuisines requested, ambience preferences
+- Track conversation progression (greeting → location → cuisine → recommendation → reservation)
+
+Response Format:
+Provide recommendations in this exact format:
+
+RECOMMENDED_TOOL_CALLS:
+1. tool_name(param1="value1", param2="value2") - Reason for this call
+2. tool_name(param="value") - Reason for this call
+
+If no tools needed:
+NO_TOOL_CALLS_NEEDED: Brief reason why
+
+Be specific with parameters and provide clear reasoning for each recommendation.
+"""
+
 # === COMBINED SYSTEM PROMPT ===
 SYSTEM_PROMPT = """
 /no_think
@@ -75,6 +140,7 @@ You only know what tools tell you. If unsure, use tools or ask for clarification
 MAX_TOOL_CALLS_PER_CONVERSATION = 5
 CONTEXT_WINDOW_LIMIT = 20  # Keep last 20 messages
 MIN_FUZZY_MATCH_CONFIDENCE = 70
+ADVISOR_CONTEXT_LIMIT = 6  # Last 6 messages for advisor analysis
 
 # Directory for storing threads
 THREADS_DIR = "threads"
@@ -106,6 +172,96 @@ def manage_context_window(messages: List[Dict]) -> List[Dict]:
         return messages[-CONTEXT_WINDOW_LIMIT:]
 
     return messages
+
+
+def get_advisor_context(messages: List[Dict]) -> List[Dict]:
+    """Get recent messages for advisor analysis"""
+    if len(messages) <= ADVISOR_CONTEXT_LIMIT:
+        return messages
+    return messages[-ADVISOR_CONTEXT_LIMIT:]
+
+
+def get_tool_call_recommendations(messages: List[Dict]) -> str:
+    """
+    Separate advisor agent that analyzes conversation and recommends tool calls
+    Returns: String with recommendations to inject into system prompt
+    """
+    try:
+        # Get recent messages for context analysis
+        advisor_context = get_advisor_context(messages)
+
+        # Create context summary for advisor
+        context_summary = "Recent conversation context:\n"
+        for i, msg in enumerate(advisor_context):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")[:200]  # Limit content length
+            context_summary += f"{i+1}. {role.upper()}: {content}\n"
+
+        # Advisor prompt
+        advisor_prompt = f"""
+        {context_summary}
+        
+        Based on the above conversation context, analyze what tool calls the main DineMate agent should make to properly respond to the user's latest message.
+        
+        Consider:
+        - What information is the user seeking?
+        - What data is needed to provide a complete response?
+        - What locations, cuisines, or ambiences have been mentioned?
+        - What stage of the conversation are we in (greeting, location finding, cuisine selection, recommendation, reservation)?
+        
+        Provide specific tool call recommendations with exact parameters.
+        """
+
+        # Call advisor model
+        advisor_response = client.chat(
+            model="qwen3:8b-fp16",
+            messages=[
+                {"role": "system", "content": ADVISOR_SYSTEM_PROMPT},
+                {"role": "user", "content": advisor_prompt},
+            ],
+            options={
+                "temperature": 0.3,  # Lower temperature for consistent recommendations
+                "top_p": 0.8,
+            },
+            think=False,
+        )
+
+        if "message" in advisor_response and "content" in advisor_response["message"]:
+            recommendations = advisor_response["message"]["content"].strip()
+            print(f"[ADVISOR] Recommendations: {recommendations}")
+            return recommendations
+        else:
+            return "NO_TOOL_CALLS_NEEDED: Advisor response was empty"
+
+    except Exception as e:
+        print(f"[ADVISOR] Error getting recommendations: {e}")
+        return "NO_TOOL_CALLS_NEEDED: Advisor error occurred"
+
+
+def inject_advisor_after_user_message(
+    messages: List[Dict], recommendations: str
+) -> List[Dict]:
+    """
+    Inject advisor recommendations as a system message after the latest user message
+    """
+    if not messages:
+        return messages
+
+    # Create the advisor injection message
+    advisor_message = {
+        "role": "system",
+        "content": f"""=== TOOL CALL ADVISOR RECOMMENDATIONS ===
+{recommendations}
+
+Important: These are suggestions based on conversation analysis. Use your judgment to decide which tools to call and when. The recommendations are meant to help you provide complete and helpful responses without missing important tool calls.
+===""",
+    }
+
+    # Insert the advisor message after the last user message
+    modified_messages = messages.copy()
+    modified_messages.append(advisor_message)
+
+    return modified_messages
 
 
 def save_thread(thread_id: str, title: str, messages: List[Dict]) -> bool:
@@ -291,14 +447,25 @@ def parse_thinking_response(text):
 
 
 def get_response_stream(messages) -> Generator[str, None, None]:
-    """Get streaming response from the model with improved error handling and limits"""
+    """Get streaming response from the model with advisor recommendations"""
     try:
+        # Get advisor recommendations
+        yield "🤖 Analyzing conversation context...\n\n"
+        recommendations = get_tool_call_recommendations(messages)
+
+        yield "✨ Processing your request...\n\n"
+
         # Manage context window to prevent token overflow
         managed_messages = manage_context_window(messages)
 
-        # Prepare messages with single system message
+        # Prepare messages with system prompt
         formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         formatted_messages.extend(managed_messages)
+
+        # Inject advisor recommendations after the latest user message
+        formatted_messages = inject_advisor_after_user_message(
+            formatted_messages, recommendations
+        )
 
         # Format tools for Ollama
         tools = [
@@ -339,6 +506,7 @@ def get_response_stream(messages) -> Generator[str, None, None]:
 
             # Continue reading the stream to get complete tool call info
             for chunk in stream:
+                # print(f"Chunk: {chunk}")
                 if "message" in chunk:
                     if (
                         "tool_calls" in chunk["message"]
@@ -394,6 +562,9 @@ def get_response_stream(messages) -> Generator[str, None, None]:
                             params = function_args
 
                         fn_res = chosen_fn(**params)
+                        print(
+                            f"🔧 Executing {function_name} with {function_args} gave:\n{fn_res}"
+                        )
 
                         # Add tool result message
                         formatted_messages.append(
@@ -408,6 +579,7 @@ def get_response_stream(messages) -> Generator[str, None, None]:
                         error_msg = (
                             f"Tool execution error for {function_name}: {str(e)}"
                         )
+                        print(error_msg)
                         yield f"❌ {error_msg}\n\n"
                         formatted_messages.append(
                             {
@@ -433,6 +605,7 @@ def get_response_stream(messages) -> Generator[str, None, None]:
                     # Stream the response after tool execution
                     tool_response_started = False
                     for chunk in stream:
+                        # print(f"Chunk: {chunk}")
                         if "message" in chunk and "content" in chunk["message"]:
                             content = chunk["message"]["content"]
                             if content:
@@ -472,6 +645,7 @@ def get_response_stream(messages) -> Generator[str, None, None]:
 
             # Continue streaming the rest
             for chunk in stream:
+                # print(f"Chunk: {chunk}")
                 if "message" in chunk and "content" in chunk["message"]:
                     content = chunk["message"]["content"]
                     if content:
@@ -484,14 +658,23 @@ def get_response_stream(messages) -> Generator[str, None, None]:
 
 
 def get_response(messages):
-    """Get complete response from the model with improved error handling and limits"""
+    """Get complete response from the model with advisor recommendations"""
     try:
+        # Get advisor recommendations
+        print("[ADVISOR] Getting tool call recommendations...")
+        recommendations = get_tool_call_recommendations(messages)
+
         # Manage context window to prevent token overflow
         managed_messages = manage_context_window(messages)
 
-        # Prepare messages with single system message
+        # Prepare messages with system prompt
         formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         formatted_messages.extend(managed_messages)
+
+        # Inject advisor recommendations after the latest user message
+        formatted_messages = inject_advisor_after_user_message(
+            formatted_messages, recommendations
+        )
 
         # Format tools for Ollama
         tools = [
@@ -508,9 +691,7 @@ def get_response(messages):
             messages=formatted_messages,
             tools=tools,
             options={
-                # "temperature": 0.1,
                 "top_p": 0.9,
-                # "num_predict": 1000,  # max_tokens equivalent in Ollama
             },
             think=False,
         )
@@ -595,9 +776,7 @@ def get_response(messages):
                         messages=formatted_messages,
                         tools=tools,
                         options={
-                            # "temperature": 0.1,
                             "top_p": 0.9,
-                            # "num_predict": 1000,
                         },
                         think=False,
                     )
