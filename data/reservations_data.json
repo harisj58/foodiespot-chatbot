@@ -1,0 +1,32 @@
+[
+  {
+    "restaurant": "FoodieSpot - Marathahalli",
+    "name": "Haris Javed",
+    "phone_number": "7007943723",
+    "headcount": 6,
+    "time_slot": {
+      "hour": 15,
+      "minute": 0
+    }
+  },
+  {
+    "restaurant": "FoodieSpot - Electronic City",
+    "name": "Haris Javed",
+    "phone_number": "7007943723",
+    "headcount": 2,
+    "time_slot": {
+      "hour": 20,
+      "minute": 0
+    }
+  },
+  {
+    "restaurant": "FoodieSpot - Nagarbhavi",
+    "name": "Enrique Iglesias",
+    "phone_number": "6393830020",
+    "headcount": 6,
+    "time_slot": {
+      "hour": 17,
+      "minute": 0
+    }
+  }
+]
