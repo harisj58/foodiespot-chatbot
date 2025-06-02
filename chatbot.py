@@ -23,6 +23,30 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Shimmer CSS
+shimmer_css = """
+<style>
+.shimmer-text {
+    background: linear-gradient(90deg, #666 25%, #888 50%, #666 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    color: transparent;
+    background-clip: text;
+    -webkit-background-clip: text;
+    font-size: 16px;
+    font-weight: 500;
+    padding: 8px 0;
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+</style>
+"""
+
+st.markdown(shimmer_css, unsafe_allow_html=True)
+
 # Create threads directory if it doesn't exist
 create_threads_directory()
 
@@ -320,17 +344,50 @@ if prompt := st.chat_input("Type your message here..."):
 
             full_response = ""
             tool_output_buffer = ""
-            current_section = "response"  # Track if we're in tool output or response
+            current_section = "response"
+            shimmer_active = False
 
             try:
                 for chunk in get_response_stream(st.session_state.messages):
                     if chunk:
+                        # Check for shimmer status messages
+                        if chunk in [
+                            "🤖 Analyzing conversation context...\n\n",
+                            "✨ Processing your request...\n\n",
+                        ]:
+                            shimmer_active = True
+                            # Extract message without emoji and extra newlines
+                            shimmer_text = (
+                                chunk.replace("🤖", "").replace("✨", "").strip()
+                            )
+
+                            with response_placeholder.container():
+                                st.markdown(
+                                    f'<div class="shimmer-text">{shimmer_text}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            continue
+
+                        # Check if actual response is starting
+                        elif chunk.startswith("✨ **Response:**"):
+                            shimmer_active = False
+                            current_section = "response"
+                            full_response = ""
+                            # Clear the shimmer and don't add this marker to response
+                            response_placeholder.empty()
+                            continue
+
                         # Check if this is a tool execution indicator
-                        if (
+                        elif (
                             chunk.startswith("🔧")
                             or chunk.startswith("📊")
                             or chunk.startswith("❌")
                         ):
+                            # If shimmer was active, clear it
+                            if shimmer_active:
+                                shimmer_active = False
+                                response_placeholder.empty()
+
                             # Tool execution output
                             tool_output_buffer += chunk
                             current_section = "tools"
@@ -340,15 +397,14 @@ if prompt := st.chat_input("Type your message here..."):
                                 with st.expander("🛠️ Tool Execution", expanded=True):
                                     st.markdown(tool_output_buffer)
 
-                        elif chunk.startswith("✨ **Response:**"):
-                            # Switch back to response section
-                            current_section = "response"
-                            full_response = ""  # Reset for clean response
-                            continue
-
                         else:
                             # Regular response content
                             if current_section == "response":
+                                # Clear shimmer if it was active
+                                if shimmer_active:
+                                    shimmer_active = False
+                                    response_placeholder.empty()
+
                                 full_response += chunk
 
                                 # Parse and display response with thinking
@@ -363,6 +419,10 @@ if prompt := st.chat_input("Type your message here..."):
                                     st.markdown(main_response)
 
             except Exception as e:
+                # Clear shimmer on error
+                if shimmer_active:
+                    response_placeholder.empty()
+
                 st.error(f"Streaming error: {str(e)}")
                 # Fallback to non-streaming
                 full_response = get_response(st.session_state.messages)
@@ -387,15 +447,9 @@ if prompt := st.chat_input("Type your message here..."):
             st.markdown(main_response)
 
     # Add assistant response to chat history
-    # For streaming, we need to ensure we save the complete response
-    if st.session_state.streaming_enabled:
-        # The full_response contains the complete response from streaming
-        final_response = (
-            full_response if "full_response" in locals() else "Response generated"
-        )
-    else:
-        final_response = full_response
-
+    final_response = (
+        full_response if "full_response" in locals() else "Response generated"
+    )
     st.session_state.messages.append({"role": "assistant", "content": final_response})
 
     # Generate thread title if this is the first exchange
@@ -408,22 +462,30 @@ if prompt := st.chat_input("Type your message here..."):
 
             # Generate title in the background
             new_title = generate_thread_title(user_msg, assistant_msg)
-            st.session_state.current_thread_title = new_title
+            if new_title and new_title != "New Chat":
+                st.session_state.current_thread_title = new_title
+                # Save immediately after title generation
+                save_thread(
+                    st.session_state.current_thread_id,
+                    st.session_state.current_thread_title,
+                    st.session_state.messages,
+                )
+                # Refresh threads list
+                st.session_state.threads_list = get_all_threads()
+                # Rerun to update the display
+                st.rerun()
 
-            # Update the display
-            st.rerun()
         except Exception as e:
             print(f"Error generating title: {e}")
             # Keep default title if generation fails
 
-    # Save thread after each exchange
+    # Always save thread after each exchange
     if st.session_state.current_thread_id:
         save_thread(
             st.session_state.current_thread_id,
             st.session_state.current_thread_title,
             st.session_state.messages,
         )
-
         # Refresh threads list to show updated info
         st.session_state.threads_list = get_all_threads()
 
