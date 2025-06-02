@@ -638,6 +638,14 @@ class ChatbotFunctions:
         headcount,
         time_slot,
     ):
+        if name.lower() == "user" or phone_number.lower() == "user":
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Need name and phone number to make a reservation. Ask the user for these details.",
+                }
+            )
+
         # 1. Validate restaurant
         matching_restaurant = next(
             (r for r in cls.__restaurants_data if r["name"] == restaurant), None
