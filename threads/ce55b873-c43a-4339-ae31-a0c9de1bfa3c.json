@@ -1,0 +1,56 @@
+{
+  "id": "ce55b873-c43a-4339-ae31-a0c9de1bfa3c",
+  "title": "Cuisine Options Available",
+  "messages": [
+    {
+      "role": "user",
+      "content": "what all cuisine options are available?"
+    },
+    {
+      "role": "assistant",
+      "content": "Here are the cuisine options available at FoodieSpot across Bengaluru:\n\n1. Andhra  \n2. Chinese  \n3. Continental  \n4. Fusion  \n5. Italian  \n6. Mangalorean  \n7. Mediterranean  \n8. North Indian  \n9. South Indian  \n10. Thai  \n\nLet me know which cuisine you're interested in, and I'll help you find the best spots! 😊"
+    },
+    {
+      "role": "user",
+      "content": "in the mood for some chinese"
+    },
+    {
+      "role": "assistant",
+      "content": "Here are the areas in Bengaluru where you can find Chinese cuisine at FoodieSpot:\n\n1. Basavanagudi  \n2. Electronic City  \n3. Nagarbhavi  \n\nWhich area would you like to explore? 😊"
+    },
+    {
+      "role": "user",
+      "content": "nagarbhavi"
+    },
+    {
+      "role": "assistant",
+      "content": "Here are the ambience options available in Nagarbhavi at FoodieSpot:\n\n1. Family Friendly  \n\nLet me know your preferred ambience, and I'll help you find the perfect spot! 😊"
+    },
+    {
+      "role": "user",
+      "content": "this matches the vibe i was looking for"
+    },
+    {
+      "role": "assistant",
+      "content": "Here's a restaurant in Nagarbhavi that matches your preferences:\n\n1. **FoodieSpot - Nagarbhavi**  \n   - **Cuisine**: Chinese  \n   - **Ambience**: Family Friendly  \n   - **Average Cost per Person**: ₹398  \n   - **Best Selling Dishes**: Filter Coffee, Idli-Vada Combo, Mysore Pak  \n   - **Rating**: 3.8/5 (based on 134 reviews)  \n\nWould you like to make a reservation here? 😊"
+    },
+    {
+      "role": "user",
+      "content": "table for 6 at 5 in the evening"
+    },
+    {
+      "role": "assistant",
+      "content": "I need your full name and phone number to proceed with the reservation. Could you please provide these details? 😊"
+    },
+    {
+      "role": "user",
+      "content": "Enrique Iglesias\n6393830020"
+    },
+    {
+      "role": "assistant",
+      "content": "Your reservation at FoodieSpot - Nagarbhavi has been confirmed! 🎉\n\n**Details:**\n- **Name**: Enrique Iglesias  \n- **Phone Number**: 6393830020  \n- **Headcount**: 6  \n- **Time Slot**: 5:00 PM  \n\nEnjoy your meal with your loved ones! Let me know if you need any further assistance. 😊"
+    }
+  ],
+  "created_at": "2025-06-02T08:47:30.997486",
+  "updated_at": "2025-06-02T08:52:57.526664"
+}
