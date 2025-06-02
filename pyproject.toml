@@ -1,10 +1,15 @@
 [project]
 name = "fdse-assignment"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "Serving food, with 💖!"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "ipykernel>=6.29.5",
     "litellm>=1.71.1",
+    "ollama>=0.5.0",
+    "openai>=1.82.0",
+    "python-dotenv>=1.1.0",
+    "rapidfuzz>=3.13.0",
     "streamlit>=1.45.1",
 ]
