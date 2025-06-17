@@ -14,12 +14,12 @@ load_dotenv()
 # Configure LiteLLM for Ollama
 litellm.set_verbose = False
 
-# === ADVISOR SYSTEM PROMPT ===
+# === NEW ADVISOR SYSTEM PROMPT ===
 ADVISOR_SYSTEM_PROMPT = """
 /no_think
-You are a Tool Call Advisor for DineMate, a restaurant assistant for FoodieSpot chain in Bengaluru.
+You are a Tool Execution Advisor for DineMate, a restaurant assistant for FoodieSpot chain in Bengaluru.
 
-Your job is to analyze conversation context and recommend which tool calls the main agent should make before responding to the user.
+Your ONLY job is to analyze the conversation and execute the necessary tool calls to gather information. You do NOT provide final responses to users.
 
 Available Tools:
 - get_matching_locations(area: str) - Check if FoodieSpot exists in an area
@@ -31,109 +31,72 @@ Available Tools:
 - get_all_ambiences() - List all ambiences across Bengaluru
 - recommend_restaurants(area, cuisine: str=None, ambience: str=None) - Get restaurant recommendations
 - make_reservation(restaurant_name: str, name: str, phone_number: str, headcount: int, time_slot: dict[str, int]) - Make reservation
-{
-  "time_slot": {
-    "type": "object",
-    "description": "The time slot for which the user is making a booking at the restaurant. Must be 24-hour time only. If unclear, ask the user to specify AM or PM.",
-    "properties": {
-      "hour": {
-        "type": "number",
-        "description": "The hour at which the user will be arriving at the restaurant. Use 24-hour time only. If unclear, ask the user to specify AM or PM."
-      },
-      "minute": {
-        "type": "number",
-        "description": "The minute at which the user will be arriving at the restaurant. Use 24-hour time only. If unclear, ask the user to specify AM or PM."
-      }
-    },
-    "required": [
-      "hour",
-      "minute"
-    ]
-  }
-}
 
-Analysis Rules:
-1. Location is REQUIRED for most operations - if user mentions area, verify it exists
-2. If user asks about cuisine availability, need area first
-3. If user wants specific cuisine, find areas that serve it
-4. For recommendations, area is mandatory, cuisine/ambience optional
-5. To make a reservation the following details are required: name, phone number, headcount and time slot. If you think the user wants to make a reservation but required data is missing or even partly missing, DO NOT suggest tool call. Instead advise collecting relevant data first before making a reservation.
-6. For reservations, need all required parameters and the user must have confirmed a restaurant first
-7. If user just greets or thanks, no tools needed
+Tool Execution Rules:
+1. You can make up to 5 sequential tool calls
+2. Make tool calls based on what information is needed to answer the user's query
+3. Stop when you have sufficient information or reach the 5-call limit
+4. If a tool call fails, stop and return results collected so far
+5. Always prioritize location verification first if area is mentioned
+6. For recommendations, ensure you have area confirmed before calling recommend_restaurants
+7. For reservations, ensure all required data is present before calling make_reservation. DO NOT assume any data for making reservations.
+8. Here is what you need to make a reservation: restaurant, name, phone number, headcount and time slot. If any of this data is missing from the user, inform the responder to collect the data from user. 
 
-Context Analysis:
-- Look at last 3-5 messages for context
-- Identify: locations mentioned, cuisines requested, ambience preferences
-- Track conversation progression (greeting → location → cuisine → recommendation → reservation)
+Decision Logic:
+- If user has finalized a location, proceed with showing the restaurant in that area.
+- If user mentions area: verify with get_matching_locations first
+- If user wants cuisine info: get_cuisine_by_area or get_area_by_cuisine
+- If user wants ambience info: get_ambience_by_area or get_area_by_ambience  
+- If user wants recommendations: ensure area is known, then call recommend_restaurants
+- If user wants reservation: ensure all required data, then call make_reservation
+- If just greeting/thanks: no tools needed
 
 Response Format:
-Provide recommendations in this exact format:
+If tool calls are needed: Execute the tools and let the tool results speak
+If no tools needed: Provide a brief reasoning (2-3 sentences max)
 
-RECOMMENDED_TOOL_CALLS:
-1. tool_name(param1="value1", param2="value2") - Reason for this call
-2. tool_name(param="value") - Reason for this call
-
-If no tools needed:
-NO_TOOL_CALLS_NEEDED: Brief reason why
-
-Be specific with parameters and provide clear reasoning for each recommendation.
+Remember: You execute tools, you don't provide final answers to users.
 """
-
-# === COMBINED SYSTEM PROMPT ===
-SYSTEM_PROMPT = """
+# === NEW FINAL RESPONDER SYSTEM PROMPT ===
+FINAL_RESPONDER_SYSTEM_PROMPT = """
 /no_think
 You are DineMate, a restaurant assistant for FoodieSpot chain in Bengaluru.
 
-Core Function
-Help users find FoodieSpot restaurants and make reservations.
+CRITICAL RULE: You can ONLY use information that is explicitly provided in the tool execution results. You must NEVER make up, assume, or infer any information that is not directly stated in the tool results.
 
-Essential Rules
-1. **Location is required** - You cannot recommend a restaurant without first having known the location in Bengaluru. The user might not always have a preferred location so guide him by showing locations he may be interested by using tools accordingly
-2. **Verify with tools** - Use `get_matching_locations` to confirm FoodieSpot exists there
-3. **Never guess** - Only use tool results, never make up information
-4. **Empty results = inform user** - If no results, say so and suggest alternatives
-5. **Never indicate ongoing process** - DO NOT respond like: "Let me check the cuisines available at FoodieSpot locations in XYZ. One moment!" This is incorrect. It means you are meant to make a tool call and you skipped it. This will irritate the user. Always make tool calls to get the relevant information before making the final response.
-6. **Find alternatives** - If a cuisine that a user is interested in is not served at a location, ALWAYS try to find locations that DO serve that cuisine and let the user know about it. DO NOT leave the user asking for more information, try to obtain it automatically.
-7. **Do not skip tool calls** - DO NOT SKIP tool calls as the user progresses with the chat. You must use tool calls to fetch latest data when user changes his mind about the cuisine, location or even ambience.
+Your job is to provide the final response to users based STRICTLY on:
+1. The conversation context
+2. Tool execution results provided to you
+3. The user's latest message
 
-Available Tools
-- `get_matching_locations` - Check if FoodieSpot is in their area
-- `get_cuisine_by_area` - Show cuisines available in confirmed area
-- `get_all_cuisines` - List all cuisines across Bengaluru
-- `get_area_by_cuisine` - Find areas with specific cuisine
-- `get_area_by_ambience` - Find areas with specific ambience
-- `get_ambience_by_area` - Show ambience available in confirmed area
-- `get_all_ambiences` - List all ambiences across Bengaluru
-- `recommend_restaurants` - Get restaurant recommendations (area is required for this but ambience and cuisine are optional)
+Response Guidelines:
+1. **NEVER HALLUCINATE**: Use ONLY the exact information from tool results - never make up data, restaurant names, addresses, phone numbers, or any other details
+2. **Be explicit about limitations**: If tool results are empty, incomplete, or don't contain specific information, clearly state this
+3. **Quote directly**: When referencing tool results, use the exact wording and data provided
+- If user has finalized a location, proceed with showing the restaurant in that area.
+4. **No assumptions**: Don't assume availability, pricing, menu items, or any details not explicitly provided
+5. **Admit gaps**: Say "I don't have that information" rather than guessing
+6. **For empty results**: State exactly what was searched and that no results were found
+7. **For partial results**: Only present the information that was actually returned
 
-Feel free to make sequential tool calls (one tool call after another) to obtain next piece of information so as to better help the user without the user asking explicitly. That makes you a better restaurant assistant.
+Forbidden Actions:
+- Creating restaurant names, addresses, or contact details
+- Assuming cuisines, ambiences, or features not explicitly listed
+- Making up availability or timing information
+- Inferring location details not provided in tool results
+- Adding descriptive details about restaurants not in the tool results
 
-Response Style
-- Friendly but direct
-- Use numbered lists for options
-- Confirm choices before next step
-- For simple greetings ("hi", "thanks"), respond briefly without tools
-- If tools return nothing, be honest about it
+Required Phrases for Common Situations:
+- When no results: "I searched for [specific query] but found no FoodieSpot locations matching your criteria."
+- When partial results: "Based on the information I found, here's what I can tell you..."
+- When missing details: "I don't have information about [specific detail] in my current results."
+- When uncertain: "The available information shows..."
 
-Introduction
-- Tell about yourself in your greeting message
-- When asked what can you do, specify all the functionalities you have and how that benefits the user (DO NOT mention name of tools to user)
-- Try to greet the user in a unique way each time
-- Guide the user towards picking a restaurant, ask if they want to dine at a location or if they are in the mood for having a specific type of cuisine
-- The user can also look up ambiences in the city and pick a reservation according to that
+You will receive tool results in this format:
+- tool_name: result_data
+- execution_summary: brief summary of what was executed
 
-Reservation making process
-- Always show the full restaurant data by using the `recommend_restaurant` tool before asking the user whether they want to make a reservation there. 
-- You need the following data to make a reservation for the user:
-    * The name of the FoodieSpot joint the user wishes to make a reservation at. Ensure it is the one the user wishes to dine at. Infer this from the conversation.
-    * The full name of the user.
-    * The phone number of the user. (Must be exactly 10 digits long)
-    * The number of people who will be dining.
-    * The time slot for which the user is making a booking at the restaurant. Must be 24-hour time only. If unclear, ask the user to specify AM or PM. Convert to 24-hour time format on your own if the user mentions in 12 hour format.
-- Ask these questions one-by-one and once everything is collected, use the `make_reservation` tool to complete the job.
-
-Key Reminder
-You only know what tools tell you. If unsure, use tools or ask for clarification.
+Use ONLY this information to craft your response. When in doubt, be conservative and admit limitations rather than fill gaps with assumptions.
 """
 
 # Configuration constants
@@ -148,6 +111,268 @@ THREADS_DIR = "threads"
 client = Client(
     host=os.environ.get("LLM_BASE_URL", "http://localhost:11434"),
 )
+
+
+def execute_tools_with_advisor(messages: List[Dict]) -> Dict:
+    """
+    New advisor agent that only executes tools and returns structured results
+    """
+    try:
+        # Get recent context for advisor
+        advisor_context = get_advisor_context(messages)
+
+        # Format tools for Ollama
+        tools = [
+            {"type": "function", "function": description}
+            for description in ChatFn.get_descriptions()
+        ]
+
+        # Prepare advisor messages
+        advisor_messages = [{"role": "system", "content": ADVISOR_SYSTEM_PROMPT}]
+        advisor_messages.extend(advisor_context)
+
+        tool_results = {
+            "tools_executed": [],
+            "execution_summary": "",
+            "total_calls": 0,
+            "status": "success",
+        }
+
+        max_tool_calls = 5
+        current_calls = 0
+
+        # Initial call to advisor
+        res = client.chat(
+            model="qwen3:8b",
+            messages=advisor_messages,
+            tools=tools,
+            options={"temperature": 0.3, "top_p": 0.8},
+            think=False,
+        )
+
+        # Execute tool calls if present
+        while (
+            "message" in res
+            and "tool_calls" in res["message"]
+            and res["message"]["tool_calls"]
+            and current_calls < max_tool_calls
+        ):
+            # Add assistant message with tool calls
+            advisor_messages.append(
+                {
+                    "role": "assistant",
+                    "content": res["message"].get("content", ""),
+                    "tool_calls": res["message"]["tool_calls"],
+                }
+            )
+
+            # Execute all tool calls in this turn
+            for tool_call in res["message"]["tool_calls"]:
+                if current_calls >= max_tool_calls:
+                    break
+
+                try:
+                    current_calls += 1
+                    function_name = tool_call["function"]["name"]
+                    function_args = tool_call["function"]["arguments"]
+
+                    print(
+                        f"[ADVISOR] Executing {function_name} (call #{current_calls})"
+                    )
+
+                    chosen_fn = getattr(ChatFn, function_name)
+
+                    # Parse arguments
+                    if isinstance(function_args, str):
+                        params = json.loads(function_args)
+                    else:
+                        params = function_args
+
+                    # Execute function
+                    fn_result = chosen_fn(**params)
+                    print(f"[ADVISOR] The tool call gave results:\n{fn_result}")
+
+                    # Store result
+                    tool_results["tools_executed"].append(
+                        {
+                            "tool_name": function_name,
+                            "parameters": params,
+                            "result": fn_result,
+                            "call_number": current_calls,
+                        }
+                    )
+
+                    # Add tool result to conversation
+                    advisor_messages.append(
+                        {
+                            "role": "tool",
+                            "content": str(fn_result),
+                            "name": function_name,
+                        }
+                    )
+
+                except Exception as e:
+                    error_msg = f"Tool execution error for {function_name}: {str(e)}"
+                    print(f"[ADVISOR] {error_msg}")
+
+                    tool_results["tools_executed"].append(
+                        {
+                            "tool_name": function_name,
+                            "parameters": function_args,
+                            "result": f"ERROR: {error_msg}",
+                            "call_number": current_calls,
+                        }
+                    )
+
+                    # Stop on error
+                    tool_results["status"] = "error"
+                    tool_results["total_calls"] = current_calls
+                    tool_results["execution_summary"] = (
+                        f"Executed {current_calls} tool calls, stopped due to error in {function_name}"
+                    )
+                    return tool_results
+
+            # If we've hit the limit, stop
+            if current_calls >= max_tool_calls:
+                break
+
+            # Get next response to see if more tools needed
+            try:
+                res = client.chat(
+                    model="qwen3:8b",
+                    messages=advisor_messages,
+                    tools=tools,
+                    options={"temperature": 0.3, "top_p": 0.8},
+                    think=False,
+                )
+            except Exception as e:
+                print(f"[ADVISOR] Error in follow-up call: {e}")
+                break
+
+        # Set final status
+        tool_results["total_calls"] = current_calls
+
+        if current_calls == 0:
+            # No tools were executed, get reasoning from advisor
+            advisor_reasoning = res["message"].get(
+                "content", "No tools needed for this query."
+            )
+            tool_results["execution_summary"] = (
+                f"No tools executed. Reasoning: {advisor_reasoning}"
+            )
+        else:
+            tool_results["execution_summary"] = (
+                f"Successfully executed {current_calls} tool calls to gather required information."
+            )
+
+        print(f"[ADVISOR] Completed with {current_calls} tool calls")
+        return tool_results
+
+    except Exception as e:
+        print(f"[ADVISOR] Error in tool execution: {e}")
+        return {
+            "tools_executed": [],
+            "execution_summary": f"Error in tool execution: {str(e)}",
+            "total_calls": 0,
+            "status": "error",
+        }
+
+
+def get_final_response_stream(
+    messages: List[Dict], tool_results: Dict
+) -> Generator[str, None, None]:
+    """
+    Final responder agent that generates streaming response using tool results
+    """
+    try:
+        # Prepare context for final responder
+        recent_messages = messages[-3:] if len(messages) > 3 else messages
+
+        # Create tool results summary for the final responder
+        tool_summary = ""
+        if tool_results["tools_executed"]:
+            tool_summary = "\n=== TOOL EXECUTION RESULTS ===\n"
+            for tool_result in tool_results["tools_executed"]:
+                tool_summary += (
+                    f"\n{tool_result['tool_name']}:\n{tool_result['result']}\n"
+                )
+            tool_summary += (
+                f"\nExecution Summary: {tool_results['execution_summary']}\n"
+            )
+            tool_summary += "===============================\n"
+        else:
+            tool_summary = f"\n=== NO TOOLS EXECUTED ===\n{tool_results['execution_summary']}\n========================\n"
+
+        # Prepare final responder messages
+        final_messages = [{"role": "system", "content": FINAL_RESPONDER_SYSTEM_PROMPT}]
+        final_messages.extend(recent_messages)
+
+        # Add tool results as system message
+        final_messages.append({"role": "system", "content": tool_summary})
+
+        # Stream the final response
+        stream = client.chat(
+            model="qwen3:8b",
+            messages=final_messages,
+            options={"top_p": 0.9, "temperature": 0.7},
+            think=False,
+            stream=True,
+        )
+
+        for chunk in stream:
+            if "message" in chunk and "content" in chunk["message"]:
+                content = chunk["message"]["content"]
+                if content:
+                    yield content
+
+    except Exception as e:
+        yield f"Error generating response: {str(e)}"
+
+
+def get_final_response(messages: List[Dict], tool_results: Dict) -> str:
+    """
+    Final responder agent that generates complete response using tool results
+    """
+    try:
+        # Prepare context for final responder
+        recent_messages = messages[-3:] if len(messages) > 3 else messages
+
+        # Create tool results summary
+        tool_summary = ""
+        if tool_results["tools_executed"]:
+            tool_summary = "\n=== TOOL EXECUTION RESULTS ===\n"
+            for tool_result in tool_results["tools_executed"]:
+                tool_summary += (
+                    f"\n{tool_result['tool_name']}:\n{tool_result['result']}\n"
+                )
+            tool_summary += (
+                f"\nExecution Summary: {tool_results['execution_summary']}\n"
+            )
+            tool_summary += "===============================\n"
+        else:
+            tool_summary = f"\n=== NO TOOLS EXECUTED ===\n{tool_results['execution_summary']}\n========================\n"
+
+        # Prepare final responder messages
+        final_messages = [{"role": "system", "content": FINAL_RESPONDER_SYSTEM_PROMPT}]
+        final_messages.extend(recent_messages)
+
+        # Add tool results as system message
+        final_messages.append({"role": "system", "content": tool_summary})
+
+        # Get the final response
+        res = client.chat(
+            model="qwen3:8b",
+            messages=final_messages,
+            options={"top_p": 0.9, "temperature": 0.7},
+            think=False,
+        )
+
+        return res["message"].get(
+            "content", "I apologize, but I couldn't generate a proper response."
+        )
+
+    except Exception as e:
+        return f"Error generating response: {str(e)}"
 
 
 def create_threads_directory():
@@ -214,7 +439,7 @@ def get_tool_call_recommendations(messages: List[Dict]) -> str:
 
         # Call advisor model
         advisor_response = client.chat(
-            model="qwen3:8b-fp16",
+            model="qwen3:8b",
             messages=[
                 {"role": "system", "content": ADVISOR_SYSTEM_PROMPT},
                 {"role": "user", "content": advisor_prompt},
@@ -370,7 +595,7 @@ def generate_thread_title(user_message: str, assistant_response: str) -> str:
 
         response = completion(
             base_url=os.environ.get("LLM_BASE_URL", "http://localhost:11434"),
-            model="ollama_chat/qwen3:8b-fp16",
+            model="ollama_chat/qwen3:8b",
             messages=[
                 {
                     "role": "system",
@@ -417,7 +642,7 @@ def test_model_connection():
     try:
         response = completion(
             base_url=os.environ.get("LLM_BASE_URL", "http://localhost:11434"),
-            model="ollama_chat/qwen3:8b-fp16",
+            model="ollama_chat/qwen3:8b",
             messages=[{"role": "user", "content": "Hello"}],
             stream=False,
             temperature=0.1,
@@ -447,364 +672,32 @@ def parse_thinking_response(text):
 
 
 def get_response_stream(messages) -> Generator[str, None, None]:
-    """Get streaming response from the model with advisor recommendations"""
+    """Modified streaming response using new two-agent architecture"""
     try:
-        # Get advisor recommendations
-        yield "🤖 Analyzing conversation context...\n\n"
-        recommendations = get_tool_call_recommendations(messages)
+        # Step 1: Execute tools with advisor (silently)
+        yield "🤖 Thinking...\n\n"
+        tool_results = execute_tools_with_advisor(messages)
 
-        yield "✨ Processing your request...\n\n"
-
-        # Manage context window to prevent token overflow
-        managed_messages = manage_context_window(messages)
-
-        # Prepare messages with system prompt
-        formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        formatted_messages.extend(managed_messages)
-
-        # Inject advisor recommendations after the latest user message
-        formatted_messages = inject_advisor_after_user_message(
-            formatted_messages, recommendations
-        )
-
-        # Format tools for Ollama
-        tools = [
-            {"type": "function", "function": description}
-            for description in ChatFn.get_descriptions()
-        ]
-
-        tool_call_count = 0
-        accumulated_response = ""
-
-        # Initial completion call with streaming
-        stream = client.chat(
-            model="qwen3:8b-fp16",
-            messages=formatted_messages,
-            tools=tools,
-            options={
-                "top_p": 0.9,
-            },
-            think=False,
-            stream=True,
-        )
-
-        # Check if we need to handle tool calls or can stream directly
-        first_chunk = next(stream, None)
-        if not first_chunk:
-            yield "Error: No response from model"
-            return
-
-        # If the first chunk has tool calls, we need to handle them first
-        if (
-            "message" in first_chunk
-            and "tool_calls" in first_chunk["message"]
-            and first_chunk["message"]["tool_calls"]
-        ):
-            # Tool calls detected - handle them non-streaming first
-            # Reconstruct the full response for tool handling
-            full_response = first_chunk
-
-            # Continue reading the stream to get complete tool call info
-            for chunk in stream:
-                # print(f"Chunk: {chunk}")
-                if "message" in chunk:
-                    if (
-                        "tool_calls" in chunk["message"]
-                        and chunk["message"]["tool_calls"]
-                    ):
-                        # Merge tool calls
-                        if "tool_calls" not in full_response["message"]:
-                            full_response["message"]["tool_calls"] = []
-                        full_response["message"]["tool_calls"].extend(
-                            chunk["message"]["tool_calls"]
-                        )
-
-                    if "content" in chunk["message"] and chunk["message"]["content"]:
-                        if "content" not in full_response["message"]:
-                            full_response["message"]["content"] = ""
-                        full_response["message"]["content"] += chunk["message"][
-                            "content"
-                        ]
-
-            # Handle tool calls
-            while (
-                "message" in full_response
-                and "tool_calls" in full_response["message"]
-                and full_response["message"]["tool_calls"]
-                and tool_call_count < MAX_TOOL_CALLS_PER_CONVERSATION
-            ):
-                tool_call_count += 1
-                yield f"🔧 Executing tools... (Call #{tool_call_count})\n\n"
-
-                # Add assistant message with tool calls
-                formatted_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": full_response["message"].get("content", ""),
-                        "tool_calls": full_response["message"]["tool_calls"],
-                    }
-                )
-
-                # Execute all tool calls in this turn
-                for tool_call in full_response["message"]["tool_calls"]:
-                    try:
-                        function_name = tool_call["function"]["name"]
-                        function_args = tool_call["function"]["arguments"]
-
-                        yield f"📊 Using {function_name}...\n\n"
-
-                        chosen_fn = getattr(ChatFn, function_name)
-
-                        # Parse arguments if they're a string
-                        if isinstance(function_args, str):
-                            params = json.loads(function_args)
-                        else:
-                            params = function_args
-
-                        fn_res = chosen_fn(**params)
-                        print(
-                            f"🔧 Executing {function_name} with {function_args} gave:\n{fn_res}"
-                        )
-
-                        # Add tool result message
-                        formatted_messages.append(
-                            {
-                                "role": "tool",
-                                "content": str(fn_res),
-                                "name": function_name,
-                            }
-                        )
-
-                    except Exception as e:
-                        error_msg = (
-                            f"Tool execution error for {function_name}: {str(e)}"
-                        )
-                        print(error_msg)
-                        yield f"❌ {error_msg}\n\n"
-                        formatted_messages.append(
-                            {
-                                "role": "tool",
-                                "content": f"Error: {error_msg}",
-                                "name": function_name,
-                            }
-                        )
-
-                # Get streaming response after tool execution
-                try:
-                    stream = client.chat(
-                        model="qwen3:8b-fp16",
-                        messages=formatted_messages,
-                        tools=tools,
-                        options={
-                            "top_p": 0.9,
-                        },
-                        think=False,
-                        stream=True,
-                    )
-
-                    # Stream the response after tool execution
-                    tool_response_started = False
-                    for chunk in stream:
-                        # print(f"Chunk: {chunk}")
-                        if "message" in chunk and "content" in chunk["message"]:
-                            content = chunk["message"]["content"]
-                            if content:
-                                if not tool_response_started:
-                                    yield f"✨ **Response:**\n\n"
-                                    tool_response_started = True
-                                accumulated_response += content
-                                yield content
-
-                        # Check if there are more tool calls
-                        if (
-                            "message" in chunk
-                            and "tool_calls" in chunk["message"]
-                            and chunk["message"]["tool_calls"]
-                        ):
-                            full_response = chunk
-                            break
-                    else:
-                        # No more tool calls, we're done
-                        break
-
-                except Exception as e:
-                    yield f"❌ Error in follow-up completion: {str(e)}"
-                    break
-
-            # Handle case where max tool calls exceeded
-            if tool_call_count >= MAX_TOOL_CALLS_PER_CONVERSATION:
-                yield "\n\n⚠️ Maximum tool calls reached. Please start a new conversation."
-
-        else:
-            # No tool calls, stream the response directly
-            if "message" in first_chunk and "content" in first_chunk["message"]:
-                content = first_chunk["message"]["content"]
-                if content:
-                    accumulated_response += content
-                    yield content
-
-            # Continue streaming the rest
-            for chunk in stream:
-                # print(f"Chunk: {chunk}")
-                if "message" in chunk and "content" in chunk["message"]:
-                    content = chunk["message"]["content"]
-                    if content:
-                        accumulated_response += content
-                        yield content
+        # Step 2: Stream final response
+        yield from get_final_response_stream(messages, tool_results)
 
     except Exception as e:
-        error_msg = f"❌ Error: {str(e)}"
-        yield error_msg
+        yield f"❌ Error: {str(e)}"
 
 
 def get_response(messages):
-    """Get complete response from the model with advisor recommendations"""
+    """Modified complete response using new two-agent architecture"""
     try:
-        # Get advisor recommendations
-        print("[ADVISOR] Getting tool call recommendations...")
-        recommendations = get_tool_call_recommendations(messages)
+        # Step 1: Execute tools with advisor
+        tool_results = execute_tools_with_advisor(messages)
 
-        # Manage context window to prevent token overflow
-        managed_messages = manage_context_window(messages)
-
-        # Prepare messages with system prompt
-        formatted_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        formatted_messages.extend(managed_messages)
-
-        # Inject advisor recommendations after the latest user message
-        formatted_messages = inject_advisor_after_user_message(
-            formatted_messages, recommendations
-        )
-
-        # Format tools for Ollama
-        tools = [
-            {"type": "function", "function": description}
-            for description in ChatFn.get_descriptions()
-        ]
-
-        response = ""
-        tool_call_count = 0
-
-        # Initial completion call
-        res = client.chat(
-            model="qwen3:8b-fp16",
-            messages=formatted_messages,
-            tools=tools,
-            options={
-                "top_p": 0.9,
-            },
-            think=False,
-        )
-
-        # Check if there are tool calls in the response
-        if (
-            "message" not in res
-            or "tool_calls" not in res["message"]
-            or not res["message"]["tool_calls"]
-        ):
-            # No tool calls, return the content directly
-            response = res["message"]["content"] if "content" in res["message"] else ""
-        else:
-            # Handle tool calls with proper limits and error handling
-            while (
-                "message" in res
-                and "tool_calls" in res["message"]
-                and res["message"]["tool_calls"]
-                and tool_call_count < MAX_TOOL_CALLS_PER_CONVERSATION
-            ):
-                tool_call_count += 1
-                print(f"Tool call #{tool_call_count}")
-
-                # Add assistant message with tool calls
-                formatted_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": res["message"].get("content", ""),
-                        "tool_calls": res["message"]["tool_calls"],
-                    }
-                )
-
-                # Execute all tool calls in this turn
-                tool_results = []
-                for tool_call in res["message"]["tool_calls"]:
-                    try:
-                        function_name = tool_call["function"]["name"]
-                        function_args = tool_call["function"]["arguments"]
-
-                        print(
-                            f"Executing: {function_name} with params: {function_args}"
-                        )
-
-                        chosen_fn = getattr(ChatFn, function_name)
-
-                        # Parse arguments if they're a string
-                        if isinstance(function_args, str):
-                            params = json.loads(function_args)
-                        else:
-                            params = function_args
-
-                        fn_res = chosen_fn(**params)
-                        print(f"Function response: {fn_res}")
-
-                        # Add tool result message
-                        formatted_messages.append(
-                            {
-                                "role": "tool",
-                                "content": str(fn_res),
-                                "name": function_name,
-                            }
-                        )
-                        tool_results.append(fn_res)
-
-                    except Exception as e:
-                        error_msg = (
-                            f"Tool execution error for {function_name}: {str(e)}"
-                        )
-                        print(error_msg)
-                        formatted_messages.append(
-                            {
-                                "role": "tool",
-                                "content": f"Error: {error_msg}",
-                                "name": function_name,
-                            }
-                        )
-
-                # Get response after tool execution
-                try:
-                    res = client.chat(
-                        model="qwen3:8b-fp16",
-                        messages=formatted_messages,
-                        tools=tools,
-                        options={
-                            "top_p": 0.9,
-                        },
-                        think=False,
-                    )
-
-                    if (
-                        "message" in res
-                        and "content" in res["message"]
-                        and res["message"]["content"]
-                    ):
-                        response = res["message"]["content"]
-                        break
-
-                except Exception as e:
-                    print(f"Error in follow-up completion: {e}")
-                    response = "I encountered an error processing your request. Please try again."
-                    break
-
-            # Handle case where max tool calls exceeded
-            if tool_call_count >= MAX_TOOL_CALLS_PER_CONVERSATION:
-                if not response:
-                    response = "I've reached the maximum number of tool calls for this conversation. Please start a new conversation or rephrase your request."
+        # Step 2: Generate final response
+        response = get_final_response(messages, tool_results)
 
         return response
 
     except Exception as e:
-        error_msg = f"Error: {str(e)}"
-        print(f"Complete error in get_response: {error_msg}")
-        return error_msg
+        return f"Error: {str(e)}"
 
 
 def export_all_threads() -> str:
