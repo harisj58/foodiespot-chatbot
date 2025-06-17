@@ -642,7 +642,7 @@ class ChatbotFunctions:
             return json.dumps(
                 {
                     "success": False,
-                    "error": "Need name and phone number to make a reservation. Ask the user for these details.",
+                    "error": "Need the following details to make reservation: name, phone number, head count and time slot. Ask the user for these details.",
                 }
             )
 
