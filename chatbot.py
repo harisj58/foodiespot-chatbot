@@ -352,8 +352,7 @@ if prompt := st.chat_input("Type your message here..."):
                     if chunk:
                         # Check for shimmer status messages
                         if chunk in [
-                            "🤖 Analyzing conversation context...\n\n",
-                            "✨ Processing your request...\n\n",
+                            "🤖 Thinking...\n\n",
                         ]:
                             shimmer_active = True
                             # Extract message without emoji and extra newlines
